@@ -171,6 +171,7 @@ export async function initDb() {
       status TEXT DEFAULT 'done',
       confidence REAL,
       notes TEXT,
+      narrative TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -232,6 +233,7 @@ export async function initDb() {
     `ALTER TABLE clients ADD COLUMN contact_email TEXT`,
     `ALTER TABLE clients ADD COLUMN contact_phone TEXT`,
     `ALTER TABLE clients ADD COLUMN notes TEXT`,
+    `ALTER TABLE analyses ADD COLUMN narrative TEXT`,
   ]) {
     try { await db.exec(sql); } catch { /* já aplicado ou não suportado pelo driver */ }
   }

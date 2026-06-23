@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
 import rateLimit from 'express-rate-limit';
@@ -7,6 +8,12 @@ import { signToken } from '../lib/jwt.js';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../lib/email.js';
 import { isValidEmail, trim, badRequest, unauthorized } from '../lib/validate.js';
 import { authRequired } from '../middleware/auth.js';
+
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
 
 const router = Router();
 
@@ -67,7 +74,7 @@ router.post('/register', registerLimit, async (req, res, next) => {
 
     const tenantId = nanoid(10);
     const userId = nanoid(10);
-    const hash = await bcrypt.hash(password, 10);
+    const hash = await bcrypt.hash(password, 12);
 
     await db.prepare('INSERT INTO tenants (id, name) VALUES (?, ?)').run(tenantId, company);
     await db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role)
@@ -96,7 +103,7 @@ router.post('/verify-email', verifyLimit, async (req, res, next) => {
     if (!rec) throw badRequest('Nenhum código pendente.', { code: 'Solicite um novo código.' });
     if (rec.used) throw badRequest('Código já utilizado.', { code: 'Solicite um novo código.' });
     if (new Date(rec.expires_at).getTime() < Date.now()) throw badRequest('Código expirado.', { code: 'Solicite um novo código.' });
-    if (rec.code !== code) throw badRequest('Código incorreto.', { code: 'Código incorreto. Verifique e tente novamente.' });
+    if (!timingSafeEqual(rec.code, code)) throw badRequest('Código incorreto.', { code: 'Código incorreto. Verifique e tente novamente.' });
 
     await db.prepare('UPDATE email_verifications SET used = 1 WHERE id = ?').run(rec.id);
     await db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(userId);
@@ -212,7 +219,8 @@ router.post('/forgot-password', forgotLimit, async (req, res, next) => {
 });
 
 // POST /auth/reset-password
-router.post('/reset-password', async (req, res, next) => {
+const resetLimit = rateLimit({ windowMs: 60_000, max: 3, message: { error: 'Muitas tentativas. Aguarde 1 minuto.' }, standardHeaders: true, legacyHeaders: false });
+router.post('/reset-password', resetLimit, async (req, res, next) => {
   try {
     const token = trim(req.body?.token);
     const newPassword = req.body?.password || '';
@@ -230,7 +238,7 @@ router.post('/reset-password', async (req, res, next) => {
       throw badRequest('Token expirado.', { token: 'O link expirou. Solicite um novo.' });
     }
 
-    const hash = await bcrypt.hash(newPassword, 10);
+    const hash = await bcrypt.hash(newPassword, 12);
     await db.prepare('UPDATE users SET password_hash = ?, failed_login_count = 0, locked_until = NULL WHERE id = ?')
       .run(hash, rec.user_id);
     await db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').run(rec.id);
@@ -281,7 +289,7 @@ router.post('/accept-invite/:token', async (req, res, next) => {
     if (invite.used_at) throw badRequest('Este convite já foi utilizado.');
     if (new Date(invite.expires_at) < new Date()) throw badRequest('Este convite expirou.');
 
-    const hash = await bcrypt.hash(password, 10);
+    const hash = await bcrypt.hash(password, 12);
     await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, invite.user_id);
     await db.prepare('UPDATE invites SET used_at = CURRENT_TIMESTAMP WHERE id = ?').run(invite.id);
 

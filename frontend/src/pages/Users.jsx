@@ -79,7 +79,7 @@ export default function Users() {
               const isMe = u.id === me?.id;
               const pending = !!u.invite_pending;
               return (
-                <div key={u.id} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14, borderTop: i > 0 ? '1px solid var(--bd)' : 'none' }}>
+                <div key={u.id} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, borderTop: i > 0 ? '1px solid var(--bd)' : 'none' }}>
                   <div style={{ width: 40, height: 40, borderRadius: 999, background: 'var(--blue)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
                     {initials(u.name)}
                   </div>
@@ -89,7 +89,7 @@ export default function Users() {
                       <i className="ti ti-mail" style={{ fontSize: 12 }}></i> {u.email}
                     </div>
                   </div>
-                  <span className="pill pill-b" style={{ gap: 4 }}>
+                  <span style={{ fontSize: 12, padding: '4px 10px', borderRadius: 999, background: 'var(--bg2)', color: 'var(--t2)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <i className="ti ti-shield" style={{ fontSize: 12 }}></i> {pending ? 'Pendente' : 'Gerente'}
                   </span>
                   {isManager && !isMe && (

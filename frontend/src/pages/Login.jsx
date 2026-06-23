@@ -56,17 +56,17 @@ export default function Login() {
         <div className="auth-panel-top">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div className="auth-panel-badge">S</div>
-            <span style={{ fontFamily: 'var(--font-serif)', fontSize: 24, color: '#E6E5DD' }}>SynerCoop</span>
+            <span style={{ fontFamily: 'var(--font-serif)', fontSize: 24 }}>SynerCoop</span>
           </div>
         </div>
         <div className="auth-panel-quote">
-          <p style={{ fontFamily: 'var(--font-serif)', fontSize: 28, lineHeight: 1.4, maxWidth: 420 }}>
+          <p style={{ fontFamily: 'var(--font-serif)', fontSize: 30, lineHeight: 1.375, maxWidth: 420 }}>
             "Reduzimos o tempo de análise de balanço de{' '}
             <span style={{ color: 'var(--gold)', fontStyle: 'italic' }}>3 horas para 5 minutos</span>.
             O relatório sai pronto."
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 24 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 999, background: '#1A2941', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 500 }}>RM</div>
+            <div style={{ width: 40, height: 40, borderRadius: 999, background: 'var(--sidebar-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 500 }}>RM</div>
             <div>
               <div style={{ fontSize: 14 }}>Dr. Roberto Mendes</div>
               <div style={{ fontSize: 12, opacity: .6 }}>Mendes & Associados</div>
@@ -74,23 +74,23 @@ export default function Login() {
           </div>
         </div>
         <div style={{ fontSize: 12, opacity: .5 }}>
-          © 2025 SynerCoop · Dados isolados por escritório · LGPD
+          © 2026 SynerCoop · Dados isolados por escritório · LGPD
         </div>
       </div>
 
       {/* Right panel — login form */}
       <div className="auth-form-side">
         <div className="auth-form-wrap">
-          <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', color: 'var(--t0)', marginBottom: 8 }}>
+          <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', color: 'var(--t0)' }}>
             Bem-vindo de volta
           </h1>
-          <p style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 32 }}>
+          <p style={{ fontSize: 14, color: 'var(--t2)', marginTop: 8 }}>
             Entre no painel do seu escritório.
           </p>
 
           {err && <div className="auth-err">{err}</div>}
 
-          <form onSubmit={onSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <form onSubmit={onSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 32 }}>
             <div>
               <label className="inp-label" style={{ fontSize: 12, fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--t0)' }}>E-mail</label>
               <div style={{ position: 'relative', marginTop: 6 }}>
@@ -120,7 +120,7 @@ export default function Login() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '24px 0' }}>
             <div style={{ flex: 1, height: 1, background: 'var(--bd)' }}></div>
-            <span style={{ fontSize: 12, color: 'var(--t3)' }}>ou</span>
+            <span style={{ fontSize: 12, color: 'var(--t2)' }}>ou</span>
             <div style={{ flex: 1, height: 1, background: 'var(--bd)' }}></div>
           </div>
 

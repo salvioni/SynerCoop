@@ -16,6 +16,7 @@ import AnalysesList from './pages/AnalysesList.jsx';
 import Users from './pages/Users.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
+import NewAnalysis from './pages/NewAnalysis.jsx';
 import AdminShell from './pages/admin/AdminShell.jsx';
 import AdminTenants from './pages/admin/AdminTenants.jsx';
 import Landing from './pages/Landing.jsx';
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="clients" element={<Clients />} />
         <Route path="clients/:id" element={<ClientView />} />
         <Route path="analyses" element={<AnalysesList />} />
+        <Route path="analyses/new" element={<NewAnalysis />} />
         <Route path="analyses/:id" element={<AnalysisView />} />
         <Route path="users" element={<Users />} />
         <Route path="account" element={<Account />} />

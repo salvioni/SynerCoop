@@ -64,10 +64,10 @@ export default function Landing() {
             calcula os indicadores e entrega um relatório de diagnóstico pronto para enviar.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 36 }}>
-            <Link to="/register" className="btn btn-p" style={{ padding: '12px 24px' }}>
+            <Link to="/register" className="btn btn-p" style={{ padding: '12px 20px' }}>
               Criar conta gratuita <i className="ti ti-arrow-right"></i>
             </Link>
-            <Link to="/app/dashboard" className="btn" style={{ padding: '12px 24px' }}>
+            <Link to="/app/dashboard" className="btn" style={{ padding: '12px 20px' }}>
               Ver demonstração
             </Link>
           </div>
@@ -81,17 +81,17 @@ export default function Landing() {
         <div className="ld-preview">
           <div className="ld-preview-bar">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="ld-dot" style={{ background: '#D01D21' }}></span>
-              <span className="ld-dot" style={{ background: '#EB881F' }}></span>
-              <span className="ld-dot" style={{ background: '#14874E' }}></span>
-              <span style={{ marginLeft: 12, fontFamily: 'ui-monospace, monospace', fontSize: 12, color: 'var(--t3)' }}>synercoop.app/relatorio/cooperativa-agro-uniao</span>
+              <span className="ld-dot" style={{ background: 'var(--red)', opacity: 0.6 }}></span>
+              <span className="ld-dot" style={{ background: 'var(--yellow-t)', opacity: 0.7 }}></span>
+              <span className="ld-dot" style={{ background: 'var(--green-t)', opacity: 0.7 }}></span>
+              <span style={{ marginLeft: 12, fontFamily: 'ui-monospace, monospace', fontSize: 12, color: 'var(--t2)' }}>synercoop.app/relatorio/cooperativa-agro-uniao</span>
             </div>
             <span style={{ fontSize: 12, color: 'var(--green-t)' }}>● ao vivo</span>
           </div>
           <div className="ld-preview-grid">
             {PREVIEW.map(k => (
               <div key={k.l} className="ld-preview-cell">
-                <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--t2)' }}>{k.l}</div>
+                <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--t2)' }}>{k.l}</div>
                 <div style={{ fontFamily: 'var(--font-serif)', fontSize: 36, marginTop: 8 }}>{k.v}</div>
                 <div style={{ fontSize: 12, color: k.c, marginTop: 8 }}>● {k.s}</div>
               </div>
@@ -112,10 +112,10 @@ export default function Landing() {
               <div key={s.n} className="ld-step">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <i className={`ti ${s.icon}`} style={{ fontSize: 24, color: 'var(--gold)' }}></i>
-                  <span style={{ fontFamily: 'var(--font-serif)', fontSize: 24, color: 'var(--t3)', opacity: .5 }}>{s.n}</span>
+                  <span style={{ fontFamily: 'var(--font-serif)', fontSize: 24, color: 'var(--t2)', opacity: .6 }}>{s.n}</span>
                 </div>
                 <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, marginTop: 24 }}>{s.t}</h3>
-                <p style={{ fontSize: 14, color: 'var(--t2)', marginTop: 8, lineHeight: 1.6 }}>{s.d}</p>
+                <p style={{ fontSize: 14, color: 'var(--t2)', marginTop: 8, lineHeight: 1.625 }}>{s.d}</p>
               </div>
             ))}
           </div>
@@ -130,7 +130,7 @@ export default function Landing() {
             <h2 className="ld-section-title">
               Todos os indicadores que você já calcula <span className="ld-accent">no Excel</span> — automaticamente.
             </h2>
-            <p style={{ color: 'var(--t2)', marginTop: 24, lineHeight: 1.7 }}>
+            <p style={{ color: 'var(--t2)', marginTop: 24, lineHeight: 1.625 }}>
               Cobrimos a metodologia tradicional de análise contábil: liquidez, rentabilidade, endividamento,
               capacidade operacional e capital de giro. Você revisa, ajusta e gera o PDF do relatório.
             </p>
@@ -160,7 +160,7 @@ export default function Landing() {
                 <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24 }}>{p.name}</div>
                 <div style={{ fontFamily: 'var(--font-serif)', fontSize: 36, marginTop: 8 }}>
                   {p.price}
-                  {p.price.startsWith('R$ ') && p.price !== 'R$ 0' && <span style={{ fontSize: 14, color: 'var(--t2)', fontFamily: 'inherit' }}>/mês</span>}
+                  {p.price.startsWith('R$ ') && p.price !== 'R$ 0' && <span style={{ fontSize: 14, color: 'var(--t2)', fontFamily: 'var(--font-sans)' }}>/mês</span>}
                 </div>
                 <p style={{ fontSize: 14, color: 'var(--t2)', marginTop: 8 }}>{p.desc}</p>
                 <ul className="ld-plan-feats">
@@ -183,7 +183,7 @@ export default function Landing() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div className="ld-logo-badge" style={{ width: 24, height: 24, fontSize: 10 }}>S</div>
             <span style={{ fontFamily: 'var(--font-serif)', fontSize: 16 }}>SynerCoop</span>
-            <span style={{ color: 'var(--t3)' }}>© 2025</span>
+            <span style={{ color: 'var(--t3)' }}>© 2026</span>
           </div>
           <div style={{ display: 'flex', gap: 24, fontSize: 14, color: 'var(--t2)' }}>
             <a href="#" style={{ color: 'inherit' }}>Termos</a>

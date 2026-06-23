@@ -7,15 +7,26 @@ import { badRequest, trim } from '../lib/validate.js';
 import { audit, ACTIONS } from '../lib/audit.js';
 import { extractFromFile } from '../lib/extractor.js';
 import { calculateIndicators } from '../lib/calculator.js';
+import { generateText } from '../lib/llm.js';
+
+const ALLOWED_MIMES = new Set([
+  'application/pdf',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/octet-stream',
+]);
+const ALLOWED_EXTS = new Set(['.pdf', '.xlsx', '.xls']);
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const allowed = ['.pdf', '.xlsx', '.xls'];
     const ext = '.' + file.originalname.split('.').pop().toLowerCase();
-    if (allowed.includes(ext)) cb(null, true);
-    else cb(new Error(`Formato não suportado: ${ext}. Use PDF, XLSX ou XLS.`));
+    if (!ALLOWED_EXTS.has(ext)) return cb(new Error(`Formato não suportado: ${ext}. Use PDF, XLSX ou XLS.`));
+    if (!ALLOWED_MIMES.has(file.mimetype) && !file.mimetype.includes('spreadsheet') && !file.mimetype.includes('excel')) {
+      return cb(new Error('Tipo de arquivo não permitido.'));
+    }
+    cb(null, true);
   },
 });
 
@@ -86,7 +97,7 @@ router.get('/:id', async (req, res, next) => {
     if (!client) throw badRequest('Cliente não encontrado.');
 
     const analyses = await db.prepare(`
-      SELECT id, year, status, created_at, updated_at
+      SELECT id, year, status, confidence, bp, dsp, indicators, created_at, updated_at
       FROM analyses WHERE client_id = ? ORDER BY year DESC
     `).all(req.params.id);
 
@@ -147,6 +158,7 @@ router.post('/:id/extract', upload.single('file'), async (req, res, next) => {
     if (!req.file) throw badRequest('Nenhum arquivo enviado.');
 
     const extracted = await extractFromFile(req.file.buffer, req.file.originalname, client.name);
+    console.log('[extract]', req.file.originalname, '→ confidence:', extracted.confidence, 'notes:', extracted.notes, 'total_ativo:', extracted.bp?.total_ativo, 'receita_liquida:', extracted.dsp?.receita_liquida);
     res.json({ extracted });
   } catch (e) { next(e); }
 });
@@ -187,10 +199,57 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
     if (dup) throw badRequest(`Já existe uma análise para o ano ${year} deste cliente.`, { year: 'Ano já analisado.' });
 
     const id = nanoid(10);
+
+    // Gerar narrative via IA
+    let narrative = null;
+    try {
+      const narrativePrompt = `Você é um analista financeiro especializado em cooperativas brasileiras.
+Com base nos indicadores financeiros abaixo, gere um relatório de análise detalhado e profissional.
+
+Empresa: ${client.name}
+Tipo: ${client.type || 'cooperativa'}
+Exercício: ${year}
+
+INDICADORES: ${JSON.stringify(indicators, null, 2)}
+BALANÇO PATRIMONIAL: ${JSON.stringify(bpData, null, 2)}
+DSP: ${JSON.stringify(dspData, null, 2)}
+
+Retorne SOMENTE um JSON válido (sem texto antes ou depois) com esta estrutura:
+{
+  "sumario": "Parágrafo de 3-5 frases resumindo a situação financeira geral.",
+  "liquidez": "Parágrafo analisando liquidez corrente, geral, seca e imobilização. Cite os valores exatos.",
+  "rentabilidade": "Parágrafo analisando ROE, ROA, margem e EBITDA. Cite valores.",
+  "endividamento": "Parágrafo analisando endividamento total, perfil, alavancagem. Cite valores.",
+  "capacidade_operacional": "Parágrafo analisando PMR, PME, PMP, ciclo financeiro, giro. Cite valores.",
+  "tesouraria": "Parágrafo analisando capital de giro, NCG, tesouraria, independência. Cite valores.",
+  "forcas": "1-2 frases sobre pontos fortes.",
+  "fraquezas": "1-2 frases sobre pontos de atenção.",
+  "riscos": "1-2 frases sobre riscos identificados.",
+  "recomendacoes": ["Recomendação 1: descrição.", "Recomendação 2: descrição.", "Recomendação 3: descrição.", "Recomendação 4: descrição."]
+}
+
+Regras:
+- Linguagem profissional mas acessível para contadores e diretores
+- Cooperativas usam "sobras/perdas" em vez de "lucro/prejuízo"
+- Cite valores exatos dos indicadores
+- Recomendações práticas e acionáveis`;
+
+      let raw = await generateText(narrativePrompt, { maxTokens: 8000 });
+      if (raw.includes('```')) { const m = raw.match(/```(?:json)?\s*([\s\S]*?)```/); if (m) raw = m[1]; }
+      raw = raw.trim();
+      const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
+      if (s >= 0 && e > s) raw = raw.substring(s, e + 1);
+      raw = raw.replace(/,\s*([}\]])/g, '$1');
+      narrative = JSON.parse(raw);
+      console.log('[narrative] Relatório gerado para', client.name, year);
+    } catch (err) {
+      console.warn('[narrative] Falha ao gerar relatório:', err.message);
+    }
+
     await db.prepare(`
-      INSERT INTO analyses (id, client_id, year, bp, dsp, indicators, confidence, notes, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'done')
-    `).run(id, client.id, year, JSON.stringify(bpData), JSON.stringify(dspData), JSON.stringify(indicators), confidence, notes);
+      INSERT INTO analyses (id, client_id, year, bp, dsp, indicators, confidence, notes, narrative, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'done')
+    `).run(id, client.id, year, JSON.stringify(bpData), JSON.stringify(dspData), JSON.stringify(indicators), confidence, notes, narrative ? JSON.stringify(narrative) : null);
 
     const analysis = await db.prepare('SELECT * FROM analyses WHERE id = ?').get(id);
     await audit(req, ACTIONS.ANALYSIS_CREATED, { targetType: 'analysis', targetId: id, targetLabel: `${client.name} ${year}` });
@@ -200,6 +259,7 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
       bp: JSON.parse(analysis.bp || 'null'),
       dsp: JSON.parse(analysis.dsp || 'null'),
       indicators: JSON.parse(analysis.indicators || 'null'),
+      narrative: analysis.narrative ? JSON.parse(analysis.narrative) : null,
     };
     res.status(201).json({ analysis: parsed });
   } catch (e) { next(e); }

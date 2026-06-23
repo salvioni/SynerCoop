@@ -1,84 +1,56 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api, uploadFile, ApiError } from '../lib/api.js';
+import { api } from '../lib/api.js';
 import ConfirmModal from '../components/ConfirmModal.jsx';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
-const BP_FIELDS = [
-  { k: 'ativo_circulante',    label: 'Ativo Circulante' },
-  { k: 'estoques',            label: 'Estoques' },
-  { k: 'disponibilidades',    label: 'Disponibilidades' },
-  { k: 'clientes',            label: 'Clientes / Recebíveis' },
-  { k: 'ativo_realizavel_lp', label: 'Realizável Longo Prazo' },
-  { k: 'ativo_permanente',    label: 'Ativo Permanente' },
-  { k: 'total_ativo',         label: 'Total do Ativo' },
-  { k: 'passivo_circulante',  label: 'Passivo Circulante' },
-  { k: 'passivo_exigivel_lp', label: 'Exigível Longo Prazo' },
-  { k: 'patrimonio_liquido',  label: 'Patrimônio Líquido' },
-  { k: 'capital_integralizado', label: 'Capital Integralizado' },
-  { k: 'total_passivo_pl',    label: 'Total Passivo + PL' },
-];
+const FMT = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact', maximumFractionDigits: 1 });
+const brl = v => v != null ? FMT.format(v) : '—';
+const pct = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
+const num = v => v != null ? Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 
-const DSP_FIELDS = [
-  { k: 'ingressos',             label: 'Ingressos / Rec. Bruta' },
-  { k: 'receita_bruta',         label: 'Receita Bruta' },
-  { k: 'receita_liquida',       label: 'Receita Líquida' },
-  { k: 'cmv',                   label: 'CMV / CMO' },
-  { k: 'lucro_bruto',           label: 'Lucro Bruto' },
-  { k: 'despesas_operacionais', label: 'Despesas Operacionais' },
-  { k: 'resultado_antes_ir',    label: 'Resultado Antes IR' },
-  { k: 'imposto_renda',         label: 'Imposto de Renda' },
-  { k: 'sobras_perdas',         label: 'Sobras / Perdas' },
-  { k: 'depreciacao_amortizacao', label: 'Depreciação / Amort.' },
-];
+const COLORS = {
+  blue: 'oklch(0.24 0.06 260)',
+  gold: 'oklch(0.78 0.12 80)',
+  green: 'oklch(0.55 0.13 155)',
+  red: 'oklch(0.55 0.21 27)',
+  muted: 'oklch(0.5 0.02 255)',
+  bg: 'oklch(0.96 0.008 250)',
+};
+const PIE_COLORS = [COLORS.blue, COLORS.gold, COLORS.green, COLORS.muted];
 
-function toNum(v) {
-  if (v === '' || v === null || v === undefined) return null;
-  const n = parseFloat(String(v).replace(',', '.'));
-  return isNaN(n) ? null : n;
+function parseAnalysis(a) {
+  return {
+    year: a.year,
+    bp: typeof a.bp === 'string' ? JSON.parse(a.bp || '{}') : (a.bp || {}),
+    dsp: typeof a.dsp === 'string' ? JSON.parse(a.dsp || '{}') : (a.dsp || {}),
+    ind: typeof a.indicators === 'string' ? JSON.parse(a.indicators || '{}') : (a.indicators || {}),
+  };
 }
 
-function fmtInp(v) {
-  if (v == null) return '';
-  return String(v);
-}
-
-function confClass(c) {
-  if (!c) return '';
-  if (c >= 0.85) return 'conf-hi';
-  if (c >= 0.6) return 'conf-mid';
-  return 'conf-lo';
-}
-
-const SUSPICIOUS_BP = new Set(['total_ativo', 'total_passivo_pl', 'patrimonio_liquido']);
-const SUSPICIOUS_DSP = new Set(['receita_liquida', 'ingressos', 'receita_bruta']);
-
-function isSuspicious(section, k, v) {
-  const isZeroLike = (v === 0 || v === '0' || v === '' || v == null);
-  if (section === 'bp') return SUSPICIOUS_BP.has(k) && isZeroLike;
-  if (section === 'dsp') return SUSPICIOUS_DSP.has(k) && isZeroLike;
-  return false;
-}
-
-function Stepper({ phase }) {
-  const s1 = phase === 'idle' ? 'step-active' : 'step-done';
-  const s2 = phase === 'reviewing' ? 'step-active' : phase === 'saving' ? 'step-done' : 'step-todo';
-  const s3 = phase === 'saving' ? 'step-active' : 'step-todo';
+function ChartCard({ title, subtitle, children }) {
   return (
-    <div className="stepper">
-      <div className={`step-item ${s1}`}>
-        <div className="step-circle">{s1 === 'step-done' ? '✓' : '1'}</div>
-        <span className="step-label">1. Arquivo</span>
+    <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h3 style={{ fontSize: 16 }}>{title}</h3>
+        {subtitle && <span style={{ fontSize: 12, color: 'var(--t2)' }}>{subtitle}</span>}
       </div>
-      <div className={`step-line${s2 !== 'step-todo' ? ' line-done' : ''}`}></div>
-      <div className={`step-item ${s2}`}>
-        <div className="step-circle">{s2 === 'step-done' ? '✓' : '2'}</div>
-        <span className="step-label">2. Conferir dados</span>
-      </div>
-      <div className={`step-line${s3 !== 'step-todo' ? ' line-done' : ''}`}></div>
-      <div className={`step-item ${s3}`}>
-        <div className="step-circle">{s3 === 'step-done' ? '✓' : '3'}</div>
-        <span className="step-label">3. Ver análise</span>
-      </div>
+      {children}
+    </div>
+  );
+}
+
+function CustomTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 8, padding: '10px 14px', fontSize: 13, boxShadow: '0 4px 12px rgba(0,0,0,.1)' }}>
+      <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--t0)' }}>{label}</div>
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.color, display: 'flex', gap: 8, justifyContent: 'space-between' }}>
+          <span>{p.name}</span>
+          <span style={{ fontWeight: 500 }}>{typeof p.value === 'number' ? FMT.format(p.value) : p.value}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -86,26 +58,10 @@ function Stepper({ phase }) {
 export default function ClientView() {
   const { id } = useParams();
   const navigate = useNavigate();
-
   const [client, setClient] = useState(null);
   const [analyses, setAnalyses] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  // upload state machine: idle | processing | reviewing | saving
-  const [phase, setPhase] = useState('idle');
-  const [file, setFile] = useState(null);
-  const [drag, setDrag] = useState(false);
-  const [uploadErr, setUploadErr] = useState('');
-
-  // review state
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [bp, setBp] = useState({});
-  const [dsp, setDsp] = useState({});
-  const [confidence, setConfidence] = useState(null);
-  const [extractNotes, setExtractNotes] = useState('');
-
   const [confirm, setConfirm] = useState(null);
-  const fileRef = useRef(null);
 
   useEffect(() => {
     api.get(`/clients/${id}`)
@@ -113,60 +69,6 @@ export default function ClientView() {
       .catch(() => navigate('/app/clients', { replace: true }))
       .finally(() => setLoading(false));
   }, [id]);
-
-  function selectFile(f) {
-    if (!f) return;
-    const ext = f.name.split('.').pop().toLowerCase();
-    if (!['pdf', 'xlsx', 'xls'].includes(ext)) {
-      setUploadErr('Formato não suportado. Use PDF, XLSX ou XLS.');
-      return;
-    }
-    setFile(f);
-    setUploadErr('');
-  }
-
-  async function doExtract() {
-    if (!file) return;
-    setPhase('processing');
-    setUploadErr('');
-    try {
-      const r = await uploadFile(`/clients/${id}/extract`, file);
-      const ex = r.extracted;
-      setBp(ex.bp || {});
-      setDsp(ex.dsp || {});
-      setYear(ex.year || new Date().getFullYear());
-      setConfidence(ex.confidence ?? null);
-      setExtractNotes(ex.notes || '');
-      setPhase('reviewing');
-    } catch (e) {
-      setUploadErr(e instanceof ApiError ? e.message : 'Erro ao extrair dados.');
-      setPhase('idle');
-    }
-  }
-
-  async function doSave() {
-    setPhase('saving');
-    try {
-      const bpClean = {};
-      const dspClean = {};
-      BP_FIELDS.forEach(({ k }) => { const v = toNum(bp[k]); if (v !== null) bpClean[k] = v; });
-      DSP_FIELDS.forEach(({ k }) => { const v = toNum(dsp[k]); if (v !== null) dspClean[k] = v; });
-
-      const r = await api.post(`/clients/${id}/analyses`, {
-        bp: bpClean, dsp: dspClean, year: Number(year), confidence, notes: extractNotes || undefined,
-      });
-      navigate(`/app/analyses/${r.analysis.id}`, { replace: true });
-    } catch (e) {
-      setUploadErr(e instanceof ApiError ? e.message : 'Erro ao salvar análise.');
-      setPhase('reviewing');
-    }
-  }
-
-  function cancelReview() {
-    setPhase('idle');
-    setFile(null);
-    setUploadErr('');
-  }
 
   async function deleteAnalysis(a) {
     setConfirm(null);
@@ -176,219 +78,258 @@ export default function ClientView() {
     } catch (e) { alert(e.message); }
   }
 
-  if (loading) return null;
-  if (!client) return null;
+  if (loading || !client) return null;
 
-  // ——— REVIEWING PHASE ———
-  if (phase === 'reviewing' || phase === 'saving') {
-    return (
-      <>
-        <div className="page-head">
-          <div className="page-head-l">
-            <h1>Revisar extração</h1>
-            <p>{client.name}</p>
-          </div>
-          {phase === 'reviewing' && (
-            <div style={{ display: 'flex', gap: 7 }}>
-              <button className="btn" onClick={cancelReview}>Cancelar</button>
-              <button className="btn btn-p" onClick={doSave}>
-                <i className="ti ti-check"></i> Confirmar e Salvar
-              </button>
-            </div>
-          )}
-        </div>
+  const sorted = [...analyses].sort((a, b) => a.year - b.year);
+  const parsed = sorted.map(parseAnalysis);
+  const latest = parsed[parsed.length - 1];
 
-        <div className="page-body">
-          {phase === 'saving' ? (
-            <>
-              <Stepper phase="saving" />
-              <div className="processing">
-                <i className="ti ti-loader"></i>
-                Salvando análise…
-              </div>
-            </>
-          ) : (
-            <>
-              <Stepper phase="reviewing" />
+  const STATS = [
+    { label: 'Total de análises', val: analyses.length, icon: 'ti-chart-bar' },
+    { label: 'Último exercício', val: latest?.year || '—', icon: 'ti-calendar' },
+    { label: 'Ativo Total', val: brl(latest?.bp?.total_ativo), icon: 'ti-building-bank' },
+    { label: 'Receita Líquida', val: brl(latest?.dsp?.receita_liquida ?? latest?.dsp?.ingressos), icon: 'ti-trending-up' },
+  ];
 
-              {uploadErr && <div className="err-banner">{uploadErr}</div>}
+  const KEY_IND = [
+    { label: 'Liquidez Corrente', val: num(latest?.ind?.liquidez?.liquidez_corrente), good: (latest?.ind?.liquidez?.liquidez_corrente ?? 0) >= 1 },
+    { label: 'Endividamento Total', val: pct(latest?.ind?.endividamento?.endividamento_total_pct), good: (latest?.ind?.endividamento?.endividamento_total_pct ?? 1) <= 0.6 },
+    { label: 'ROE', val: pct(latest?.ind?.rentabilidade?.rentabilidade_pl_pct), good: (latest?.ind?.rentabilidade?.rentabilidade_pl_pct ?? 0) >= 0.03 },
+    { label: 'Ciclo Operacional', val: latest?.ind?.capacidade_operacional?.ciclo_operacional != null ? Math.round(latest.ind.capacidade_operacional.ciclo_operacional) + ' dias' : '—', good: (latest?.ind?.capacidade_operacional?.ciclo_operacional ?? 999) <= 120 },
+    { label: 'Capital de Giro', val: brl(latest?.ind?.tesouraria?.capital_giro), good: (latest?.ind?.tesouraria?.capital_giro ?? 0) > 0 },
+    { label: 'EBITDA', val: brl(latest?.ind?.liquidez?.ebitda), good: (latest?.ind?.liquidez?.ebitda ?? 0) > 0 },
+  ];
 
-              <div className="review-hint">
-                <i className="ti ti-sparkles"></i>
-                <p>
-                  <strong>A IA extraiu os dados automaticamente.</strong>{' '}
-                  Confira os valores e corrija qualquer número errado antes de continuar.
-                  Campos com borda amarela merecem atenção.
-                </p>
-              </div>
+  // Chart data
+  const evolutionData = parsed.map(p => ({
+    name: String(p.year),
+    'Ativo Total': p.bp.total_ativo || 0,
+    'Receita Líquida': p.dsp.receita_liquida || p.dsp.ingressos || 0,
+    'Sobras/Perdas': p.dsp.sobras_perdas || 0,
+  }));
 
-              <div className="review-bar">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {confidence != null && (
-                    <span className={`conf-badge ${confClass(confidence)}`}>
-                      <i className="ti ti-sparkles"></i> {(confidence * 100).toFixed(0)}% confiança
-                    </span>
-                  )}
-                  {extractNotes && (
-                    <span style={{ fontSize: 11, color: 'var(--yellow-t)' }}>
-                      <i className="ti ti-info-circle"></i> {extractNotes}
-                    </span>
-                  )}
-                </div>
-                <div className="review-year">
-                  <label htmlFor="rev-year">Ano fiscal:</label>
-                  <input id="rev-year" className="year-inp" type="number" value={year}
-                    onChange={e => setYear(e.target.value)} min={2000} max={2099} />
-                </div>
-              </div>
+  const indicatorData = parsed.map(p => ({
+    name: String(p.year),
+    'Liquidez Corrente': p.ind.liquidez?.liquidez_corrente || 0,
+    'Endividamento %': (p.ind.endividamento?.endividamento_total_pct || 0) * 100,
+    'ROE %': (p.ind.rentabilidade?.rentabilidade_pl_pct || 0) * 100,
+  }));
 
-              <div className="rv-sect">
-                <div className="rv-sect-title">Balanço Patrimonial (BP)</div>
-                <div className="rv-grid">
-                  {BP_FIELDS.map(({ k, label }) => {
-                    const warn = isSuspicious('bp', k, bp[k]);
-                    return (
-                      <div key={k} className="rv-cell">
-                        <label htmlFor={`bp-${k}`}>{label}</label>
-                        <input id={`bp-${k}`} className={`rv-inp${warn ? ' rv-warn' : ''}`} type="number"
-                          value={fmtInp(bp[k])}
-                          onChange={e => setBp(p => ({ ...p, [k]: e.target.value }))}
-                          placeholder="0" />
-                        {warn && <div className="rv-warn-note"><i className="ti ti-alert-triangle"></i> Verificar</div>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+  const compositionData = latest ? [
+    { name: 'Ativo Circulante', value: latest.bp.ativo_circulante || 0 },
+    { name: 'Ativo Permanente', value: latest.bp.ativo_permanente || 0 },
+    { name: 'Realizável LP', value: latest.bp.ativo_realizavel_lp || 0 },
+  ].filter(d => d.value > 0) : [];
 
-              <div className="rv-sect">
-                <div className="rv-sect-title">Demonstração do Resultado (DSP)</div>
-                <div className="rv-grid">
-                  {DSP_FIELDS.map(({ k, label }) => {
-                    const warn = isSuspicious('dsp', k, dsp[k]);
-                    return (
-                      <div key={k} className="rv-cell">
-                        <label htmlFor={`dsp-${k}`}>{label}</label>
-                        <input id={`dsp-${k}`} className={`rv-inp${warn ? ' rv-warn' : ''}`} type="number"
-                          value={fmtInp(dsp[k])}
-                          onChange={e => setDsp(p => ({ ...p, [k]: e.target.value }))}
-                          placeholder="0" />
-                        {warn && <div className="rv-warn-note"><i className="ti ti-alert-triangle"></i> Verificar</div>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+  const dspData = latest ? [
+    { name: 'Receita Líquida', value: Math.abs(latest.dsp.receita_liquida || 0) },
+    { name: 'CMV', value: Math.abs(latest.dsp.cmv || 0) },
+    { name: 'Desp. Operacionais', value: Math.abs(latest.dsp.despesas_operacionais || 0) },
+    { name: 'Sobras/Perdas', value: Math.abs(latest.dsp.sobras_perdas || 0) },
+  ].filter(d => d.value > 0) : [];
 
-              <div style={{ paddingTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 7 }}>
-                <button className="btn" onClick={cancelReview}>Cancelar</button>
-                <button className="btn btn-p" onClick={doSave}>
-                  <i className="ti ti-check"></i> Confirmar e Salvar
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </>
-    );
-  }
+  const hasMultiple = parsed.length > 1;
 
-  // ——— IDLE / PROCESSING PHASE ———
   return (
-    <>
-      <div className="page-head">
-        <div className="page-head-l">
-          <button className="back" onClick={() => navigate('/app/clients')}>
-            <i className="ti ti-arrow-left"></i> Clientes
-          </button>
-          <h1>{client.name}</h1>
-          <p>{client.type}{client.cnpj ? ` · ${client.cnpj}` : ''}</p>
+    <div className="page-body" style={{ padding: '40px 32px' }}>
+      <button className="back" onClick={() => navigate('/app/clients')} style={{ marginBottom: 16 }}>
+        <i className="ti ti-arrow-left"></i> Clientes
+      </button>
+
+      {/* Client header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 32 }}>
+        <div style={{
+          width: 52, height: 52, borderRadius: 12, background: 'var(--blue)', color: '#fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 500, flexShrink: 0,
+        }}>
+          {client.name.charAt(0).toUpperCase()}
+        </div>
+        <div style={{ flex: 1 }}>
+          <h1 style={{ marginBottom: 4 }}>{client.name}</h1>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 14, color: 'var(--t2)' }}>
+            <span style={{ textTransform: 'capitalize' }}>{client.type || 'empresa'}</span>
+            {client.cnpj && <span style={{ fontFamily: 'ui-monospace, monospace' }}>{client.cnpj}</span>}
+            {client.contact_email && <span><i className="ti ti-mail" style={{ fontSize: 14, marginRight: 4 }}></i>{client.contact_email}</span>}
+          </div>
         </div>
       </div>
 
-      <div className="page-body">
-        {phase === 'processing' ? (
-          <div className="processing">
-            <i className="ti ti-loader"></i>
-            Extraindo dados do arquivo…
-          </div>
-        ) : (
-          <>
-            {uploadErr && <div className="err-banner">{uploadErr}</div>}
-
-            {/* Upload zone */}
-            <div
-              className={`upload-zone${drag ? ' drag' : ''}`}
-              onDragOver={e => { e.preventDefault(); setDrag(true); }}
-              onDragLeave={() => setDrag(false)}
-              onDrop={e => { e.preventDefault(); setDrag(false); selectFile(e.dataTransfer.files[0]); }}
-              onClick={() => fileRef.current?.click()}
-            >
-              <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls"
-                onChange={e => selectFile(e.target.files[0])} />
-              <div className="uz-icon"><i className="ti ti-cloud-upload"></i></div>
-              {file ? (
-                <>
-                  <div className="uz-title uz-file"><i className="ti ti-file-check"></i> {file.name}</div>
-                  <div className="uz-sub">Clique para trocar o arquivo</div>
-                </>
-              ) : (
-                <>
-                  <div className="uz-title">Arraste o arquivo aqui ou clique para selecionar</div>
-                  <div className="uz-sub">PDF, XLSX ou XLS · máx. 50 MB</div>
-                </>
-              )}
+      {/* Summary stats */}
+      <div className="dash-grid" style={{ marginBottom: 24 }}>
+        {STATS.map(({ label, val, icon }) => (
+          <div key={label} className="dash-card">
+            <div className="dash-card-head">
+              <span className="dash-card-label">{label}</span>
+              <i className={`ti ${icon} dash-card-icon`}></i>
             </div>
+            <div className="dash-card-val">{val}</div>
+          </div>
+        ))}
+      </div>
 
-            {file && (
-              <div style={{ display: 'flex', gap: 7, marginBottom: 16 }}>
-                <button className="btn" style={{ flex: 1, justifyContent: 'center' }}
-                  onClick={() => { setFile(null); setUploadErr(''); }}>
-                  <i className="ti ti-x"></i> Remover arquivo
-                </button>
-                <button className="btn btn-p" style={{ flex: 2, justifyContent: 'center' }} onClick={doExtract}>
-                  <i className="ti ti-sparkles"></i> Analisar arquivo
-                </button>
+      {/* Charts row — evolution + composition */}
+      {latest && (
+        <div style={{ display: 'grid', gridTemplateColumns: hasMultiple ? '1.5fr 1fr' : '1fr 1fr', gap: 16, marginBottom: 24 }}>
+          {hasMultiple ? (
+            <ChartCard title="Evolução patrimonial" subtitle="Por exercício">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={evolutionData} barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'var(--t2)' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: 'var(--t2)' }} axisLine={false} tickLine={false} tickFormatter={v => FMT.format(v)} width={70} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="Ativo Total" fill={COLORS.blue} radius={[4,4,0,0]} />
+                  <Bar dataKey="Receita Líquida" fill={COLORS.gold} radius={[4,4,0,0]} />
+                  <Bar dataKey="Sobras/Perdas" fill={COLORS.green} radius={[4,4,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          ) : (
+            <ChartCard title="Composição do Ativo" subtitle={`Exercício ${latest.year}`}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+                <ResponsiveContainer width="50%" height={200}>
+                  <PieChart>
+                    <Pie data={compositionData} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={45} paddingAngle={2}>
+                      {compositionData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip content={<CustomTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {compositionData.map((d, i) => (
+                    <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 2, background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }}></div>
+                      <span style={{ color: 'var(--t2)' }}>{d.name}</span>
+                      <span style={{ fontWeight: 500, color: 'var(--t0)', marginLeft: 'auto' }}>{FMT.format(d.value)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            )}
+            </ChartCard>
+          )}
 
-            {/* Analyses history */}
-            <div className="sec-title">Análises anteriores ({analyses.length})</div>
-            {!analyses.length ? (
-              <div className="cl-empty" style={{ padding: '24px 0' }}>
-                <i className="ti ti-file-off"></i>
-                Nenhuma análise. Faça upload de um arquivo acima.
-              </div>
-            ) : (
-              <div className="an-list">
-                {analyses.map(a => (
-                  <div key={a.id} className="an-item" onClick={() => navigate(`/app/analyses/${a.id}`)}>
-                    <div className="an-year">{a.year}</div>
-                    <div className="an-info">
-                      <div className="an-client">{client.name}</div>
-                      <div className="an-date">{new Date(a.created_at).toLocaleDateString('pt-BR')}</div>
-                    </div>
-                    <span className="pill pill-g">Concluída</span>
-                    <div onClick={e => e.stopPropagation()}>
-                      <button className="ib ib-d" title="Excluir" onClick={() => setConfirm({
-                        title: `Excluir análise ${a.year}?`,
-                        message: 'Esta ação é irreversível.',
-                        danger: true, confirmLabel: 'Excluir',
-                        onConfirm: () => deleteAnalysis(a),
-                      })}>
-                        <i className="ti ti-trash"></i>
-                      </button>
-                    </div>
-                    <i className="ti ti-chevron-right" style={{ color: 'var(--t3)', flexShrink: 0 }}></i>
+          <ChartCard title="Resultado (DSP)" subtitle={`Exercício ${latest.year}`}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+              <ResponsiveContainer width="50%" height={200}>
+                <PieChart>
+                  <Pie data={dspData} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={45} paddingAngle={2}>
+                    {dspData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {dspData.map((d, i) => (
+                  <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }}></div>
+                    <span style={{ color: 'var(--t2)' }}>{d.name}</span>
+                    <span style={{ fontWeight: 500, color: 'var(--t0)', marginLeft: 'auto' }}>{FMT.format(d.value)}</span>
                   </div>
                 ))}
               </div>
-            )}
-          </>
+            </div>
+          </ChartCard>
+        </div>
+      )}
+
+      {/* Indicators evolution (only with multiple analyses) */}
+      {hasMultiple && (
+        <div style={{ marginBottom: 24 }}>
+          <ChartCard title="Evolução dos indicadores" subtitle="Por exercício">
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={indicatorData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'var(--t2)' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--t2)' }} axisLine={false} tickLine={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="Liquidez Corrente" stroke={COLORS.blue} strokeWidth={2} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="Endividamento %" stroke={COLORS.red} strokeWidth={2} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="ROE %" stroke={COLORS.green} strokeWidth={2} dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      )}
+
+      {/* Key indicators */}
+      {latest && (
+        <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ fontSize: 16 }}>Indicadores-chave</h3>
+            <span style={{ fontSize: 12, color: 'var(--t2)' }}>Exercício {latest.year}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            {KEY_IND.map(({ label, val, good }) => (
+              <div key={label} style={{ padding: '12px 16px', background: 'var(--bg2)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 6 }}>{label}</div>
+                <div style={{ fontSize: 18, fontWeight: 500, color: 'var(--t0)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {val}
+                  {val !== '—' && (
+                    <span style={{ fontSize: 10, color: good ? 'var(--green-t)' : 'var(--red-t)' }}>
+                      ● {good ? 'Bom' : 'Atenção'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Analysis history */}
+      <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--bd)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontSize: 16 }}>Histórico de análises</h3>
+          <span style={{ fontSize: 13, color: 'var(--t2)' }}>{analyses.length} {analyses.length === 1 ? 'análise' : 'análises'}</span>
+        </div>
+        {!analyses.length ? (
+          <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--t3)' }}>
+            <i className="ti ti-file-off" style={{ fontSize: 28, display: 'block', marginBottom: 8, opacity: .4 }}></i>
+            Nenhuma análise realizada.
+          </div>
+        ) : (
+          [...analyses].sort((a, b) => b.year - a.year).map((a, i) => (
+            <div key={a.id}
+              onClick={() => navigate(`/app/analyses/${a.id}`)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px',
+                borderTop: i > 0 ? '1px solid var(--bd)' : 'none', cursor: 'pointer',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{
+                width: 40, height: 40, borderRadius: 8, background: 'var(--bg2)', border: '1px solid var(--bd)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--blue-text)', flexShrink: 0,
+              }}>
+                {a.year}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t0)' }}>Exercício {a.year}</div>
+                <div style={{ fontSize: 12, color: 'var(--t2)', marginTop: 2 }}>
+                  {new Date(a.created_at).toLocaleDateString('pt-BR')}
+                </div>
+              </div>
+              <span className="pill pill-g">Concluída</span>
+              <div onClick={e => e.stopPropagation()}>
+                <button className="ib ib-d" title="Excluir" onClick={() => setConfirm({
+                  title: `Excluir análise ${a.year}?`,
+                  message: 'Esta ação é irreversível.',
+                  danger: true, confirmLabel: 'Excluir',
+                  onConfirm: () => deleteAnalysis(a),
+                })}>
+                  <i className="ti ti-trash"></i>
+                </button>
+              </div>
+              <i className="ti ti-chevron-right" style={{ color: 'var(--t3)', flexShrink: 0 }}></i>
+            </div>
+          ))
         )}
       </div>
 
       {confirm && <ConfirmModal {...confirm} onClose={() => setConfirm(null)} />}
-    </>
+    </div>
   );
 }

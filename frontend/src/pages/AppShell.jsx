@@ -28,6 +28,10 @@ export default function AppShell() {
           <div className="s-office-plan">Plano Pro</div>
         </div>
 
+        <button className="s-cta" onClick={() => navigate('/app/analyses/new')}>
+          <i className="ti ti-plus"></i> Nova análise
+        </button>
+
         <nav className="s-nav">
           <NavLink to="/app/dashboard" className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
             <i className="ti ti-home" aria-hidden="true"></i> Visão geral
@@ -48,21 +52,20 @@ export default function AppShell() {
           )}
         </nav>
 
-        <div className="s-meter">
-          <div className="s-meter-label">Uso do plano</div>
-          <div className="s-meter-row">
-            <span>Análises este mês</span>
-            <span>18/100</span>
-          </div>
-          <div className="s-meter-bar">
-            <div className="s-meter-fill" style={{ width: '18%' }}></div>
-          </div>
-          <div className="s-upgrade">
-            <i className="ti ti-sparkles"></i> Upgrade para Enterprise
-          </div>
-        </div>
-
         <div className="s-foot">
+          <div className="s-card-analyses">
+            <div className="s-meter-row">
+              <span>Análises este mês</span>
+              <span>18/100</span>
+            </div>
+            <div className="s-meter-bar">
+              <div className="s-meter-fill" style={{ width: '18%' }}></div>
+            </div>
+            <div className="s-upgrade">
+              <i className="ti ti-sparkles"></i> Upgrade para Enterprise
+            </div>
+          </div>
+
           <div className="s-user">
             <div className="s-av">{initials(user.name)}</div>
             <div className="s-uname">
@@ -86,6 +89,9 @@ export default function AppShell() {
         <NavLink to="/app/clients" className={({ isActive }) => isActive ? 'active' : ''}>
           <i className="ti ti-building"></i> Clientes
         </NavLink>
+        <button className="bottom-nav-cta" onClick={() => navigate('/app/analyses/new')}>
+          <i className="ti ti-plus"></i>
+        </button>
         <NavLink to="/app/analyses" className={({ isActive }) => isActive ? 'active' : ''}>
           <i className="ti ti-chart-bar"></i> Análises
         </NavLink>

@@ -1,0 +1,18 @@
+# Environment variables
+.env
+.env.local
+backend/.env
+backend/.env.local
+
+# Node
+node_modules/
+
+# Build
+dist/
+build/
+.next/node_modules/
+dist/
+.env
+*.db
+*.log
+.DS_Store

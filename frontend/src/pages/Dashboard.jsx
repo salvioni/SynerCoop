@@ -31,14 +31,9 @@ export default function Dashboard() {
 
   return (
     <div className="page-body" style={{ padding: '40px 32px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 32 }}>
-        <div>
-          <div style={{ fontSize: 14, color: 'var(--t2)' }}>{greeting()}, {firstName}</div>
-          <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 4, color: 'var(--t0)' }}>Visão geral</h1>
-        </div>
-        <button className="btn btn-p" onClick={() => navigate('/app/clients')}>
-          <i className="ti ti-plus"></i> Nova análise
-        </button>
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 14, color: 'var(--t2)' }}>{greeting()}, {firstName}</div>
+        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 4, color: 'var(--t0)' }}>Visão geral</h1>
       </div>
 
       <div className="dash-grid">

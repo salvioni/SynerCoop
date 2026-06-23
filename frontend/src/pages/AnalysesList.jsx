@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import FilterSelect from '../components/FilterSelect.jsx';
 
 export default function AnalysesList() {
   const navigate = useNavigate();
   const [analyses, setAnalyses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
 
   useEffect(() => {
     api.get('/analyses?limit=100').then(r => setAnalyses(r.analyses || []))
@@ -14,20 +17,20 @@ export default function AnalysesList() {
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = analyses.filter(a =>
-    !search || (a.client_name || '').toLowerCase().includes(search.toLowerCase())
+  const years = [...new Set(analyses.map(a => a.year))].sort((a, b) => b - a);
+
+  const filtered = analyses.filter(a => {
+    if (search && !(a.client_name || '').toLowerCase().includes(search.toLowerCase())) return false;
+    if (yearFilter && a.year !== Number(yearFilter)) return false;
+    return true;
+  }
   );
 
   return (
     <div className="page-body" style={{ padding: '40px 32px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-        <div>
-          <div style={{ fontSize: 14, color: 'var(--t2)' }}>Histórico</div>
-          <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 4, color: 'var(--t0)' }}>Análises</h1>
-        </div>
-        <button className="btn btn-p" onClick={() => navigate('/app/clients')}>
-          <i className="ti ti-plus"></i> Nova análise
-        </button>
+      <div style={{ marginBottom: 0 }}>
+        <div style={{ fontSize: 14, color: 'var(--t2)' }}>Histórico</div>
+        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 4, color: 'var(--t0)' }}>Análises</h1>
       </div>
 
       <div style={{ marginTop: 32, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -36,18 +39,28 @@ export default function AnalysesList() {
           <input className="inp" placeholder="Buscar por cliente, CNPJ..."
             value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <select className="inp" style={{ width: 'auto', minWidth: 140 }}>
-          <option>Todos status</option>
-          <option>Concluída</option>
-          <option>Processando</option>
-          <option>Rascunho</option>
-        </select>
-        <select className="inp" style={{ width: 'auto', minWidth: 130 }}>
-          <option>Todos anos</option>
-          <option>2025</option>
-          <option>2024</option>
-          <option>2023</option>
-        </select>
+        <FilterSelect
+          placeholder="Todos status"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          searchable={false}
+          options={[
+            { value: '', label: 'Todos status' },
+            { value: 'done', label: 'Concluída' },
+            { value: 'processing', label: 'Processando' },
+            { value: 'draft', label: 'Rascunho' },
+          ]}
+        />
+        <FilterSelect
+          placeholder="Todos anos"
+          value={yearFilter}
+          onChange={setYearFilter}
+          searchable={false}
+          options={[
+            { value: '', label: 'Todos anos' },
+            ...years.map(y => ({ value: String(y), label: String(y) })),
+          ]}
+        />
       </div>
 
       <div style={{ marginTop: 24 }}>
@@ -63,7 +76,6 @@ export default function AnalysesList() {
                   <th>Criada por</th>
                   <th>Data</th>
                   <th>Status</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -74,13 +86,10 @@ export default function AnalysesList() {
                     <td>{a.user_name || '—'}</td>
                     <td>{new Date(a.created_at).toLocaleDateString('pt-BR')}</td>
                     <td><span className="pill pill-g">Concluída</span></td>
-                    <td style={{ textAlign: 'right' }}>
-                      <span style={{ color: 'var(--t2)', fontSize: 14 }}>Abrir →</span>
-                    </td>
                   </tr>
                 ))}
                 {!filtered.length && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--t3)' }}>Nenhuma análise encontrada.</td></tr>
+                  <tr><td colSpan={5} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--t3)' }}>Nenhuma análise encontrada.</td></tr>
                 )}
               </tbody>
             </table>

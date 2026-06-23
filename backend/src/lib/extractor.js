@@ -223,6 +223,22 @@ function extractTextFromExcel(wb) {
   return lines.join('\n');
 }
 
+function extractFinancialSection(text) {
+  const lower = text.toLowerCase();
+  const markers = ['balanço patrimonial', 'balanços patrimoniais', 'demonstrações financeiras', 'demonstrações contábeis', 'demonstração do resultado'];
+  let bestStart = -1;
+  for (const m of markers) {
+    const idx = lower.indexOf(m);
+    if (idx >= 0 && (bestStart < 0 || idx < bestStart)) bestStart = idx;
+  }
+  if (bestStart > 0) {
+    const section = text.substring(Math.max(0, bestStart - 200));
+    if (section.length > 80000) return section.substring(0, 80000);
+    return section;
+  }
+  return null;
+}
+
 async function extractFromPdf(buffer, companyName) {
   let fullText = '';
   try {
@@ -232,11 +248,13 @@ async function extractFromPdf(buffer, companyName) {
     throw new Error(`Não foi possível ler o PDF: ${e.message}`);
   }
 
-  if (fullText.length > 50000) {
-    fullText = fullText.slice(0, 50000) + '\n... [truncado]';
-  }
+  // Tentar extrair só a seção financeira pra reduzir tokens
+  const financialSection = extractFinancialSection(fullText);
+  const textToSend = financialSection || (fullText.length > 80000 ? fullText.slice(-80000) : fullText);
 
-  return await extractWithAI(fullText, companyName, 'PDF');
+  console.log(`[extract-pdf] Total: ${fullText.length} chars, Enviando: ${textToSend.length} chars, Seção financeira: ${financialSection ? 'sim' : 'não'}`);
+
+  return await extractWithAI(textToSend, companyName, 'PDF');
 }
 
 async function extractWithAI(textContent, companyName, sourceType) {
@@ -248,13 +266,31 @@ ${textContent}
 
 ${EXTRACTION_PROMPT}`;
 
-  let raw = await generateText(prompt);
+  let raw = await generateText(prompt, { maxTokens: 16000 });
 
-  if (raw.startsWith('```')) {
-    const parts = raw.split('```');
-    raw = parts[1] || parts[0];
-    if (raw.startsWith('json')) raw = raw.slice(4);
+  // Limpar markdown e texto extra
+  if (raw.includes('```')) {
+    const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (match) raw = match[1];
+  }
+  raw = raw.trim();
+
+  // Encontrar o JSON no texto (pode ter texto antes/depois)
+  const jsonStart = raw.indexOf('{');
+  const jsonEnd = raw.lastIndexOf('}');
+  if (jsonStart >= 0 && jsonEnd > jsonStart) {
+    raw = raw.substring(jsonStart, jsonEnd + 1);
   }
 
-  return JSON.parse(raw.trim());
+  // Corrigir problemas comuns: trailing commas, NaN, comentários
+  raw = raw.replace(/,\s*([}\]])/g, '$1');
+  raw = raw.replace(/:\s*NaN/g, ': 0');
+  raw = raw.replace(/\/\/.*/g, '');
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('[extractor] JSON inválido da IA. Primeiros 500 chars:', raw.substring(0, 500));
+    throw new Error('A IA retornou dados em formato inválido. Tente novamente.');
+  }
 }

@@ -38,7 +38,7 @@ router.post('/change-password', authRequired, async (req, res, next) => {
     const ok = await bcrypt.compare(current, row.password_hash);
     if (!ok) throw badRequest('Senha atual incorreta.', { current: 'Senha incorreta.' });
 
-    const hash = await bcrypt.hash(next_, 10);
+    const hash = await bcrypt.hash(next_, 12);
     await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.user.id);
     await audit(req, ACTIONS.PW_CHANGED, { targetType: 'user', targetId: req.user.id });
     res.json({ ok: true });

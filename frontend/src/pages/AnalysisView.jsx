@@ -1,609 +1,614 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api, downloadFile, ApiError } from '../lib/api.js';
+import { api, downloadFile } from '../lib/api.js';
 import ConfirmModal from '../components/ConfirmModal.jsx';
 
-const FMT_COMPACT = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact', maximumFractionDigits: 1 });
-const brl   = v => v != null ? FMT_COMPACT.format(v) : '—';
-const fmtT  = v => v != null ? Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '—';
-const pct   = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
-const num   = v => v != null ? Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
-const days  = v => v != null ? Math.round(v) + 'd' : '—';
-const f     = (v, fn) => v == null ? '—' : fn(v);
+function AutoTextarea({ value, onChange, placeholder }) {
+  const ref = useRef(null);
+  const resize = useCallback(() => { if (ref.current) { ref.current.style.height = 'auto'; ref.current.style.height = ref.current.scrollHeight + 'px'; } }, []);
+  useEffect(() => { resize(); }, [value, resize]);
+  return <textarea ref={ref} value={value} onChange={e => { onChange(e); resize(); }} placeholder={placeholder}
+    style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg2)', color: 'var(--t0)', fontSize: 14, lineHeight: 1.7, fontFamily: 'inherit', resize: 'none', outline: 'none', overflow: 'hidden' }} />;
+}
+
+const FMT = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact', maximumFractionDigits: 1 });
+const brl = v => v != null ? FMT.format(v) : '—';
+const fmtT = v => v != null ? Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '—';
+const pct = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
+const num = v => v != null ? Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+const days = v => v != null ? Math.round(v) + 'd' : '—';
+const f = (v, fn) => v == null ? '—' : fn(v);
 const avPct = (v, ref) => (!ref || v == null) ? '—' : ((v / ref) * 100).toFixed(1) + '%';
 
 const PILARES = [
-  {
-    key: 'liquidez', label: 'Liquidez', icon: 'ti-droplet',
-    items: [
-      { k: 'liquidez_geral',                label: 'Liquidez Geral',               fn: num },
-      { k: 'liquidez_corrente',             label: 'Liquidez Corrente',             fn: num },
-      { k: 'liquidez_seca',                 label: 'Liquidez Seca',                 fn: num },
-      { k: 'garantia_capital_terceiros',    label: 'Garantia Cap. Terceiros',       fn: num },
-      { k: 'imobilizacao_recursos_proprios', label: 'Imob. Rec. Próprios',          fn: num },
-      { k: 'ebitda',                        label: 'EBITDA',                        fn: brl },
-    ],
-  },
-  {
-    key: 'endividamento', label: 'Endividamento', icon: 'ti-trending-up',
-    items: [
-      { k: 'endividamento_total_pct',            label: 'Endividamento Total',         fn: pct },
-      { k: 'endividamento_operacional_pct',       label: 'Endiv. Operacional',          fn: pct },
-      { k: 'endividamento_financeiro_total_pct',  label: 'Endiv. Financeiro',           fn: pct },
-      { k: 'endividamento_financeiro_lp_pct',     label: 'Endiv. Financeiro LP',        fn: pct },
-      { k: 'endividamento_lp_pct',                label: 'Endividamento LP',             fn: pct },
-      { k: 'perfil_endividamento_pct',            label: 'Perfil de Endividamento',     fn: pct },
-      { k: 'nivel_alavancagem_ebitda',            label: 'Alavancagem Dívida/EBITDA',   fn: num },
-    ],
-  },
-  {
-    key: 'rentabilidade', label: 'Rentabilidade', icon: 'ti-coin',
-    items: [
-      { k: 'rentabilidade_pl_pct',                   label: 'ROE (Rentab. PL)',             fn: pct },
-      { k: 'rentabilidade_ativos_pct',                label: 'ROA (Rentab. Ativos)',         fn: pct },
-      { k: 'rentabilidade_ingressos_pct',             label: 'Rentab. Ingressos',            fn: pct },
-      { k: 'rentabilidade_capital_integralizado_pct', label: 'Rentab. Cap. Integralizado',   fn: pct },
-    ],
-  },
-  {
-    key: 'capacidade_operacional', label: 'Cap. Operacional', icon: 'ti-refresh',
-    items: [
-      { k: 'pme',               label: 'PME (Est. → Vendas)',   fn: days },
-      { k: 'pmr',               label: 'PMR (Vendas → Caixa)',  fn: days },
-      { k: 'pmp',               label: 'PMP (Compras → Pag.)',  fn: days },
-      { k: 'ciclo_operacional', label: 'Ciclo Operacional',     fn: days },
-      { k: 'ciclo_financeiro',  label: 'Ciclo Financeiro',      fn: days },
-      { k: 'giro_ativo',        label: 'Giro do Ativo',         fn: num  },
-      { k: 'giro_permanente',   label: 'Giro Permanente',       fn: num  },
-    ],
-  },
-  {
-    key: 'tesouraria', label: 'Tesouraria', icon: 'ti-building-bank',
-    items: [
-      { k: 'capital_giro',               label: 'Capital de Giro',      fn: brl },
-      { k: 'capital_giro_faturamento_pct', label: 'CG / Faturamento',   fn: pct },
-      { k: 'capital_giro_pct',           label: 'CG / Ativo Total',     fn: pct },
-      { k: 'ncg',                        label: 'NCG',                   fn: brl },
-      { k: 'ncg_faturamento_pct',        label: 'NCG / Faturamento',    fn: pct },
-      { k: 'tesouraria',                 label: 'Saldo de Tesouraria',  fn: brl },
-      { k: 'tesouraria_faturamento_pct', label: 'Tesouraria / Fat.',    fn: pct },
-      { k: 'independencia_financeira',   label: 'Independência Fin.',   fn: num },
-    ],
-  },
+  { key: 'liquidez', label: 'Liquidez e Eficiência', icon: 'ti-droplet', items: [
+    { k: 'liquidez_corrente', label: 'Liquidez Corrente', fn: num },
+    { k: 'liquidez_geral', label: 'Liquidez Geral', fn: num },
+    { k: 'liquidez_seca', label: 'Liquidez Seca', fn: num },
+    { k: 'imobilizacao_recursos_proprios', label: 'Imob. Rec. Próprios', fn: pct },
+    { k: 'ebitda', label: 'EBITDA', fn: brl },
+  ]},
+  { key: 'rentabilidade', label: 'Rentabilidade', icon: 'ti-coin', items: [
+    { k: 'rentabilidade_pl_pct', label: 'ROE', fn: pct },
+    { k: 'rentabilidade_ativos_pct', label: 'ROA', fn: pct },
+    { k: 'rentabilidade_ingressos_pct', label: 'Margem Líquida', fn: pct },
+  ]},
+  { key: 'endividamento', label: 'Endividamento', icon: 'ti-trending-up', items: [
+    { k: 'endividamento_total_pct', label: 'Endividamento Total', fn: pct },
+    { k: 'perfil_endividamento_pct', label: 'Perfil (Curto Prazo)', fn: pct },
+    { k: 'nivel_alavancagem_ebitda', label: 'Dívida/EBITDA', fn: num },
+  ]},
+  { key: 'capacidade_operacional', label: 'Capacidade Operacional', icon: 'ti-refresh', items: [
+    { k: 'pmr', label: 'PMR (Recebimento)', fn: days },
+    { k: 'pme', label: 'PME (Estoques)', fn: days },
+    { k: 'pmp', label: 'PMP (Pagamento)', fn: days },
+    { k: 'ciclo_financeiro', label: 'Ciclo Financeiro', fn: days },
+    { k: 'giro_ativo', label: 'Giro do Ativo', fn: num },
+  ]},
+  { key: 'tesouraria', label: 'Tesouraria', icon: 'ti-building-bank', items: [
+    { k: 'capital_giro', label: 'Capital de Giro', fn: brl },
+    { k: 'ncg', label: 'NCG', fn: brl },
+    { k: 'tesouraria', label: 'Saldo de Tesouraria', fn: brl },
+    { k: 'independencia_financeira', label: 'Independência Fin.', fn: num },
+  ]},
 ];
 
 const SCORECARD = [
-  { key: 'liquidez',               label: 'Liquidez',         icon: '💧' },
-  { key: 'endividamento',          label: 'Endividamento',    icon: '📊' },
-  { key: 'rentabilidade',          label: 'Rentabilidade',    icon: '💰' },
-  { key: 'capacidade_operacional', label: 'Cap. Operacional', icon: '⚙️' },
-  { key: 'tesouraria',             label: 'Tesouraria',       icon: '🏦' },
+  { key: 'liquidez', label: 'Liquidez', icon: 'ti-droplet' },
+  { key: 'endividamento', label: 'Endividamento', icon: 'ti-trending-up' },
+  { key: 'rentabilidade', label: 'Rentabilidade', icon: 'ti-coin' },
+  { key: 'capacidade_operacional', label: 'Cap. Operacional', icon: 'ti-refresh' },
+  { key: 'tesouraria', label: 'Tesouraria', icon: 'ti-building-bank' },
 ];
 
-function scoreGrade(key, indicators, dsp) {
-  const ind = indicators?.[key] || {};
-  switch (key) {
-    case 'liquidez': {
-      const v = ind.liquidez_corrente;
-      if (v == null) return null;
-      if (v >= 1.5) return { grade: 'sc-green', label: 'Boa' };
-      if (v >= 1.0) return { grade: 'sc-yellow', label: 'Regular' };
-      return { grade: 'sc-red', label: 'Crítica' };
-    }
-    case 'endividamento': {
-      const v = ind.endividamento_total_pct;
-      if (v == null) return null;
-      if (v <= 0.4) return { grade: 'sc-green', label: 'Baixo' };
-      if (v <= 0.6) return { grade: 'sc-yellow', label: 'Moderado' };
-      return { grade: 'sc-red', label: 'Elevado' };
-    }
-    case 'rentabilidade': {
-      const v = ind.rentabilidade_pl_pct;
-      if (v == null) return null;
-      if (v >= 0.10) return { grade: 'sc-green', label: 'Boa' };
-      if (v >= 0.03) return { grade: 'sc-yellow', label: 'Regular' };
-      return { grade: 'sc-red', label: 'Baixa' };
-    }
-    case 'capacidade_operacional': {
-      const v = ind.ciclo_operacional;
-      if (v == null) return null;
-      if (v <= 60)  return { grade: 'sc-green', label: 'Boa' };
-      if (v <= 120) return { grade: 'sc-yellow', label: 'Regular' };
-      return { grade: 'sc-red', label: 'Longa' };
-    }
-    case 'tesouraria': {
-      const v = ind.tesouraria;
-      const receita = dsp?.receita_liquida ?? dsp?.ingressos;
-      if (v == null) return null;
-      if (v > 0) return { grade: 'sc-green', label: 'Positiva' };
-      const threshold = receita ? receita * 0.05 : 50000;
-      if (v >= -threshold) return { grade: 'sc-yellow', label: 'Neutra' };
-      return { grade: 'sc-red', label: 'Negativa' };
-    }
-    default: return null;
-  }
+function scoreGrade(key, ind) {
+  const d = ind?.[key] || {};
+  const r = { liquidez: () => { const v = d.liquidez_corrente; return v == null ? null : v >= 1.5 ? ['green','Boa'] : v >= 1 ? ['yellow','Regular'] : ['red','Crítica']; }, endividamento: () => { const v = d.endividamento_total_pct; return v == null ? null : v <= 0.4 ? ['green','Baixo'] : v <= 0.6 ? ['yellow','Moderado'] : ['red','Elevado']; }, rentabilidade: () => { const v = d.rentabilidade_pl_pct; return v == null ? null : v >= 0.10 ? ['green','Boa'] : v >= 0.03 ? ['yellow','Regular'] : ['red','Baixa']; }, capacidade_operacional: () => { const v = d.ciclo_operacional; return v == null ? null : v <= 60 ? ['green','Boa'] : v <= 120 ? ['yellow','Regular'] : ['red','Longa']; }, tesouraria: () => { const v = d.tesouraria; return v == null ? null : v > 0 ? ['green','Positiva'] : v > -50000 ? ['yellow','Neutra'] : ['red','Negativa']; } };
+  return (r[key] || (() => null))();
 }
 
-function indBadge(pilarKey, itemKey, val) {
-  if (val == null) return 'iv-n';
-  switch (pilarKey) {
-    case 'liquidez':
-      if (itemKey === 'liquidez_corrente') return val >= 1.5 ? 'iv-g' : val >= 1.0 ? 'iv-y' : 'iv-r';
-      if (['liquidez_geral', 'liquidez_seca'].includes(itemKey)) return val >= 1.0 ? 'iv-g' : val >= 0.7 ? 'iv-y' : 'iv-r';
-      if (itemKey === 'ebitda') return val > 0 ? 'iv-g' : val < 0 ? 'iv-r' : 'iv-n';
-      return val >= 1.0 ? 'iv-g' : val >= 0.5 ? 'iv-y' : 'iv-r';
-    case 'endividamento':
-      if (itemKey === 'nivel_alavancagem_ebitda') return val <= 2 ? 'iv-g' : val <= 4 ? 'iv-y' : 'iv-r';
-      return val <= 0.4 ? 'iv-g' : val <= 0.6 ? 'iv-y' : 'iv-r';
-    case 'rentabilidade':
-      return val >= 0.1 ? 'iv-g' : val >= 0.03 ? 'iv-y' : 'iv-r';
-    case 'capacidade_operacional':
-      if (itemKey === 'pmp') return val >= 30 ? 'iv-g' : val >= 15 ? 'iv-y' : 'iv-r';
-      if (itemKey === 'ciclo_financeiro') return val <= 30 ? 'iv-g' : val <= 60 ? 'iv-y' : 'iv-r';
-      if (['pme', 'pmr', 'ciclo_operacional'].includes(itemKey)) return val <= 45 ? 'iv-g' : val <= 90 ? 'iv-y' : 'iv-r';
-      return val >= 1.5 ? 'iv-g' : val >= 0.8 ? 'iv-y' : 'iv-r';
-    case 'tesouraria':
-      if (itemKey === 'independencia_financeira') return val >= 0.5 ? 'iv-g' : val >= 0.3 ? 'iv-y' : 'iv-r';
-      if (itemKey.includes('pct')) return val > 0.05 ? 'iv-g' : val > 0 ? 'iv-y' : 'iv-r';
-      return val > 0 ? 'iv-g' : val > -50000 ? 'iv-y' : 'iv-r';
-    default:
-      return val > 0 ? 'iv-g' : val < 0 ? 'iv-r' : 'iv-n';
-  }
+function indColor(pk, k, v) {
+  if (v == null) return '';
+  const r = { liquidez: () => ['liquidez_corrente','liquidez_geral','liquidez_seca'].includes(k) ? (v >= 1 ? 'green' : v >= 0.7 ? 'yellow' : 'red') : (v > 0 ? 'green' : 'red'), rentabilidade: () => v >= 0.1 ? 'green' : v >= 0.03 ? 'yellow' : 'red', endividamento: () => k === 'nivel_alavancagem_ebitda' ? (v <= 2 ? 'green' : v <= 4 ? 'yellow' : 'red') : (v <= 0.4 ? 'green' : v <= 0.6 ? 'yellow' : 'red'), capacidade_operacional: () => k === 'pmp' ? (v >= 30 ? 'green' : 'yellow') : (['pme','pmr','ciclo_financeiro','ciclo_operacional'].includes(k) ? (v <= 60 ? 'green' : v <= 120 ? 'yellow' : 'red') : (v >= 1 ? 'green' : 'yellow')), tesouraria: () => k === 'independencia_financeira' ? (v >= 0.5 ? 'green' : v >= 0.3 ? 'yellow' : 'red') : (v > 0 ? 'green' : v > -50000 ? 'yellow' : 'red') };
+  return (r[pk] || (() => ''))();
 }
+
+const GC = { green: { bg: 'rgba(20,135,78,.08)', bd: 'rgba(20,135,78,.2)', t: 'var(--green-t)' }, yellow: { bg: 'rgba(235,136,31,.08)', bd: 'rgba(235,136,31,.2)', t: 'var(--yellow-t)' }, red: { bg: 'rgba(208,29,33,.08)', bd: 'rgba(208,29,33,.2)', t: 'var(--red-t)' }, '': { bg: 'var(--bg2)', bd: 'var(--bd)', t: 'var(--t3)' } };
 
 const REPORT_SECTIONS = [
-  { key: 'resumo',       title: 'Resumo Executivo' },
-  { key: 'balanco',      title: 'Análise do Balanço Patrimonial' },
-  { key: 'resultado',    title: 'Desempenho Operacional' },
-  { key: 'indicadores',  title: 'Análise dos Indicadores' },
-  { key: 'recomendacoes', title: 'Considerações e Recomendações' },
+  { key: 'sumario', title: '1. Sumário Executivo', heading: true },
+  { key: '_h_pilares', title: '2. Análise por Pilares', heading: true, divider: true },
+  { key: 'liquidez', title: 'A. Liquidez e Eficiência Econômica' },
+  { key: 'rentabilidade', title: 'B. Rentabilidade' },
+  { key: 'endividamento', title: 'C. Endividamento' },
+  { key: 'capacidade_operacional', title: 'D. Capacidade Operacional' },
+  { key: 'tesouraria', title: 'E. Tesouraria e Capital de Giro' },
+  { key: '_h_swot', title: '3. Diagnóstico — SWOT Financeiro', heading: true, divider: true },
+  { key: 'forcas', title: 'Forças' },
+  { key: 'fraquezas', title: 'Fraquezas' },
+  { key: 'riscos', title: 'Riscos' },
+];
+
+const TABS = [
+  { k: 'geral', label: 'Visão Geral', icon: 'ti-eye' },
+  { k: 'relatorio', label: 'Relatório', icon: 'ti-file-text' },
+  { k: 'indicadores', label: 'Indicadores', icon: 'ti-chart-dots-3' },
+  { k: 'bp', label: 'Balanço Patrimonial', icon: 'ti-scale' },
+  { k: 'dsp', label: 'DSP', icon: 'ti-receipt' },
 ];
 
 export default function AnalysisView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [analysis, setAnalysis]   = useState(null);
-  const [loading, setLoading]     = useState(true);
+  const [analysis, setAnalysis] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [reporting, setReporting] = useState(false);
   const [reportErr, setReportErr] = useState('');
-  const [confirm, setConfirm]     = useState(null);
-  const [tab, setTab]             = useState('bp');
-  const [editMode, setEditMode]   = useState(false);
-  const [narrative, setNarrative] = useState({});
+  const [confirm, setConfirm] = useState(null);
+  const [tab, setTab] = useState('geral');
+  const [narrative, setNarrative] = useState(null);
+  const [genNarrative, setGenNarrative] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api.get(`/analyses/${id}`)
-      .then(d => { setAnalysis(d.analysis); setNarrative(d.analysis.narrative || {}); })
+      .then(d => { setAnalysis(d.analysis); if (d.analysis.narrative) setNarrative(d.analysis.narrative); })
       .catch(() => navigate('/app/clients', { replace: true }))
       .finally(() => setLoading(false));
   }, [id]);
+
+  async function generateNarrativeAI() {
+    setGenNarrative(true); setReportErr('');
+    try { const r = await api.post(`/analyses/${id}/narrative`); setNarrative(r.narrative); }
+    catch (e) { setReportErr(e.message || 'Erro ao gerar relatório.'); }
+    finally { setGenNarrative(false); }
+  }
+
+  async function saveNarrative() {
+    setSaving(true);
+    try { await api.patch(`/analyses/${id}/narrative`, { narrative }); setEditMode(false); }
+    catch (e) { alert(e.message); }
+    finally { setSaving(false); }
+  }
 
   async function downloadReport() {
     setReporting(true); setReportErr('');
     try {
       const blob = await downloadFile(`/analyses/${id}/report`);
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `relatorio_${analysis.client_name?.replace(/\s+/g, '_')}_${analysis.year}.docx`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) { setReportErr(e.message || 'Erro ao gerar relatório.'); }
+      const a = document.createElement('a'); a.href = url;
+      a.download = `relatorio_${analysis.client_name?.replace(/[^a-zA-Z0-9]/g, '_')}_${analysis.year}.docx`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e) { setReportErr(e.message || 'Erro ao baixar.'); }
     finally { setReporting(false); }
   }
 
   async function doDelete() {
     setConfirm(null);
-    try {
-      await api.del(`/analyses/${id}`);
-      navigate(`/app/clients/${analysis.client_id}`, { replace: true });
-    } catch (e) { alert(e.message); }
+    try { await api.del(`/analyses/${id}`); navigate(`/app/clients/${analysis.client_id}`, { replace: true }); }
+    catch (e) { alert(e.message); }
   }
 
-  if (loading) return null;
-  if (!analysis) return null;
+  function updateNarrative(key, val) { setNarrative(n => ({ ...n, [key]: val })); }
+
+  if (loading || !analysis) return null;
 
   const { bp = {}, dsp = {}, indicators = {} } = analysis;
-  const sobras     = dsp?.sobras_perdas;
+  const sobras = dsp?.sobras_perdas;
   const totalAtivo = bp.total_ativo || 1;
-
-  const topLine     = dsp.ingressos ?? dsp.receita_bruta;
-  const receitaRef  = dsp.receita_liquida ?? topLine ?? 1;
-  const deducoes    = (topLine != null && dsp.receita_liquida != null) ? topLine - dsp.receita_liquida : null;
-  const resultBruto = dsp.lucro_bruto ??
-    (dsp.receita_liquida != null && dsp.cmv != null ? dsp.receita_liquida - dsp.cmv : null);
-  const ebitda      = indicators?.liquidez?.ebitda ??
-    (resultBruto != null && dsp.despesas_operacionais != null
-      ? resultBruto - dsp.despesas_operacionais + (dsp.depreciacao_amortizacao ?? 0)
-      : null);
-  const ancTotal    = (bp.ativo_realizavel_lp != null || bp.ativo_permanente != null)
-    ? (bp.ativo_realizavel_lp ?? 0) + (bp.ativo_permanente ?? 0)
-    : (bp.total_ativo != null && bp.ativo_circulante != null ? bp.total_ativo - bp.ativo_circulante : null);
-
-  const TABS = [
-    { k: 'bp',  label: 'Balanço Patrimonial' },
-    { k: 'dsp', label: 'Resultado (DSP)' },
-    { k: 'ind', label: 'Indicadores' },
-    { k: 'rel', label: 'Relatório' },
-  ];
+  const ebitda = indicators?.liquidez?.ebitda;
+  const receitaRef = dsp.receita_liquida ?? dsp.ingressos ?? 1;
+  const ancTotal = (bp.ativo_realizavel_lp ?? 0) + (bp.ativo_permanente ?? 0) || (bp.total_ativo && bp.ativo_circulante ? bp.total_ativo - bp.ativo_circulante : null);
 
   return (
-    <>
-      {/* ── PAGE HEADER ── */}
-      <div className="page-head">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
-          <button className="back" onClick={() => navigate(`/app/clients/${analysis.client_id}`)}>
-            <i className="ti ti-arrow-left"></i> {analysis.client_name}
-          </button>
-          <div className="page-head-l" style={{ flex: 1 }}>
-            <h1>Análise {analysis.year}</h1>
-            <p>{analysis.client_name}</p>
-          </div>
+    <div className="page-body" style={{ padding: '40px 32px', maxWidth: 1000, margin: '0 auto', width: '100%' }}>
+      {/* Header */}
+      <button className="back" onClick={() => navigate(`/app/clients/${analysis.client_id}`)} style={{ marginBottom: 16 }}>
+        <i className="ti ti-arrow-left"></i> {analysis.client_name}
+      </button>
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
+        <div>
+          <p style={{ fontSize: 14, color: 'var(--t2)' }}>{analysis.client_name} · Exercício {analysis.year}</p>
+          <h1>Análise Financeira</h1>
         </div>
-        <div style={{ display: 'flex', gap: 7 }}>
-          <button className="btn btn-sm" onClick={() => setConfirm({
-            title: 'Excluir análise?',
-            message: `Análise ${analysis.year} será excluída permanentemente.`,
-            confirmLabel: 'Excluir', danger: true, onConfirm: doDelete,
-          })}>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <button className="btn btn-p" onClick={downloadReport} disabled={reporting}>
+            {reporting ? <><i className="ti ti-loader"></i> Gerando…</> : <><i className="ti ti-file-download"></i> Baixar DOCX</>}
+          </button>
+          <button className="btn" onClick={() => {
+            const url = window.location.href;
+            const text = `Análise financeira - ${analysis.client_name} (${analysis.year})`;
+            if (navigator.share) { navigator.share({ title: text, url }); }
+            else { navigator.clipboard.writeText(url).then(() => alert('Link copiado!')); }
+          }}>
+            <i className="ti ti-share"></i> Compartilhar
+          </button>
+          <button className="btn" onClick={() => setConfirm({ title: 'Excluir análise?', message: `Análise ${analysis.year} será excluída.`, confirmLabel: 'Excluir', danger: true, onConfirm: doDelete })}>
             <i className="ti ti-trash"></i>
           </button>
-          <button className="btn btn-p btn-sm" onClick={downloadReport} disabled={reporting}>
-            {reporting
-              ? <><i className="ti ti-loader"></i> Gerando…</>
-              : <><i className="ti ti-file-download"></i> Relatório</>}
-          </button>
         </div>
       </div>
 
-      {/* ── SUMMARY + SCORECARD (non-scrolling) ── */}
-      <div style={{ padding: '12px 18px 0', flexShrink: 0 }}>
-        {reportErr && <div className="err-banner" style={{ marginBottom: 10 }}>{reportErr}</div>}
+      {reportErr && <div className="err-banner" style={{ marginBottom: 16 }}>{reportErr}</div>}
 
-        <div className="sum-row">
-          {[
-            { label: 'Ativo Total',         val: f(bp?.total_ativo, brl) },
-            { label: 'Receita / Ingressos', val: f(dsp?.receita_liquida ?? dsp?.ingressos, brl) },
-            { label: 'EBITDA',              val: f(ebitda, brl) },
-            { label: 'Sobras / Perdas',     val: f(sobras, brl), neg: (sobras ?? 0) < 0 },
-          ].map(({ label, val, neg }) => (
-            <div key={label} className="sum-cell">
-              <div className="sum-label">{label}</div>
-              <div className="sum-val" style={neg ? { color: 'var(--red-t)' } : {}}>{val}</div>
-            </div>
-          ))}
-        </div>
-
-        {analysis.confidence != null && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, fontSize: 11, color: 'var(--t2)' }}>
-            <i className="ti ti-sparkles"></i>
-            Confiança da extração: <strong style={{ color: 'var(--t1)' }}>{(analysis.confidence * 100).toFixed(0)}%</strong>
-            {analysis.notes && <span>· {analysis.notes}</span>}
-          </div>
-        )}
-
-        <div className="sc-row">
-          <span className="sc-label"><i className="ti ti-stethoscope"></i> Saúde</span>
-          {SCORECARD.map(({ key, label, icon }) => {
-            const result = scoreGrade(key, indicators, dsp);
-            return (
-              <span key={key} className={`sc-pill ${result ? result.grade : 'sc-gray'}`}>
-                {icon} {label}: <strong>{result ? result.label : '—'}</strong>
-              </span>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── NAV TABS ── */}
-      <div className="nav-tabs">
-        {TABS.map(({ k, label }) => (
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 24, flexWrap: 'wrap' }}>
+        {TABS.map(({ k, label, icon }) => (
           <button key={k} className={`nav-tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>
-            {label}
+            <i className={`ti ${icon}`} style={{ fontSize: 15 }}></i> {label}
           </button>
         ))}
       </div>
 
-      {/* ── TAB BODY (scrollable) ── */}
-      <div className="tab-body">
+      {/* ═══ TAB: VISÃO GERAL ═══ */}
+      {tab === 'geral' && (() => {
+        const INDICATOR_META = {
+          liquidez_corrente: { benchmark: '> 1,20', desc: (v) => v >= 1.2 ? `R$ ${v.toFixed(2).replace('.',',')} disponível para cada R$ 1,00 de dívida no curto prazo.` : `Abaixo de 1,20 — capacidade limitada de cobrir obrigações de curto prazo.` },
+          liquidez_geral: { benchmark: '≥ 1,00', desc: (v) => v >= 1 ? 'Ativos totais cobrem todas as obrigações.' : 'Abaixo de 1,00 — ativos totais não cobrem todas as obrigações.' },
+          liquidez_seca: { benchmark: '≥ 1,00', desc: (v) => v >= 1 ? 'Boa capacidade sem depender de estoques.' : 'Dependência de venda de estoques para honrar dívidas.' },
+          imobilizacao_recursos_proprios: { benchmark: '< 80%', desc: (v) => v < 0.8 ? 'Nível saudável de imobilização.' : 'Imobilizado supera o Patrimônio Líquido; depende de capital de terceiros.' },
+          ebitda: { benchmark: '> 0', desc: (v) => v > 0 ? 'Geração de caixa operacional positiva.' : 'EBITDA negativo — operação não gera caixa.' },
+          rentabilidade_pl_pct: { benchmark: '≥ Selic', desc: (v) => v >= 0.1 ? 'Retorno atrativo para os sócios.' : v >= 0.03 ? 'Retorno positivo, mas baixo frente ao custo de oportunidade.' : 'Retorno insuficiente para os sócios.' },
+          rentabilidade_ativos_pct: { benchmark: '> 5%', desc: (v) => v >= 0.05 ? 'Boa eficiência na utilização dos ativos.' : 'Baixa eficiência na utilização dos ativos para gerar lucro.' },
+          rentabilidade_ingressos_pct: { benchmark: '> 5%', desc: (v) => v >= 0.05 ? 'Margem de sobras saudável.' : 'Margem apertada sobre os ingressos.' },
+          endividamento_total_pct: { benchmark: '< 50%', desc: (v) => v <= 0.5 ? 'Nível de endividamento controlado.' : 'Mais da metade dos ativos financiados por terceiros.' },
+          perfil_endividamento_pct: { benchmark: '< 50%', desc: (v) => v <= 0.5 ? 'Dívida bem distribuída entre curto e longo prazo.' : 'Grande parcela da dívida concentrada no curto prazo.' },
+          nivel_alavancagem_ebitda: { benchmark: '< 3x', desc: (v) => v <= 3 ? 'Alavancagem sustentável.' : 'Dívida elevada em relação à geração de caixa.' },
+          pmr: { benchmark: '< 90 dias', desc: (v) => v <= 90 ? 'Prazo de recebimento saudável.' : v <= 180 ? 'Recebimento lento — avaliar política de crédito.' : 'Prazo de recebimento excessivo.' },
+          pme: { benchmark: '< 60 dias', desc: (v) => v <= 60 ? 'Giro de estoques adequado.' : 'Estoques com giro lento.' },
+          pmp: { benchmark: '> 30 dias', desc: (v) => v >= 30 ? 'Prazo de pagamento adequado.' : 'Prazo curto de pagamento — pressão sobre o caixa.' },
+          ciclo_financeiro: { benchmark: '< 60 dias', desc: (v) => v <= 60 ? 'Ciclo financeiro eficiente.' : v <= 120 ? 'Ciclo financeiro longo — capital preso na operação.' : 'Ciclo financeiro crítico.' },
+          giro_ativo: { benchmark: '> 0,5', desc: (v) => v >= 0.5 ? 'Boa utilização dos ativos para gerar receita.' : 'Receita baixa em relação ao volume de ativos investidos.' },
+          capital_giro: { benchmark: '> 0', desc: (v) => v > 0 ? 'Capital de giro positivo.' : 'Capital de giro negativo — risco de liquidez.' },
+          ncg: { benchmark: 'Contextual', desc: (v) => v > 0 ? 'Necessidade de capital operacional.' : 'Gera caixa na operação.' },
+          tesouraria: { benchmark: '> 0', desc: (v) => v > 0 ? 'Fôlego financeiro disponível.' : 'Saldo de tesouraria negativo — dependência de financiamento.' },
+          independencia_financeira: { benchmark: '> 0,5', desc: (v) => v >= 0.5 ? 'Boa independência financeira.' : 'Dependência de capital de terceiros.' },
+        };
 
-        {/* ── BALANÇO PATRIMONIAL ── */}
-        {tab === 'bp' && (
-          <div className="bp-wrap">
-            {/* ATIVO */}
-            <div className="bp-side">
-              <div className="bp-side-title">
-                Ativo <span>{fmtT(bp.total_ativo)}</span>
+        const PILAR_META = {
+          liquidez: { title: 'Liquidez e Eficiência Econômica', desc: 'Capacidade da empresa de honrar compromissos de curto e longo prazo.' },
+          rentabilidade: { title: 'Rentabilidade', desc: 'Retorno gerado sobre patrimônio e ativos investidos.' },
+          endividamento: { title: 'Endividamento', desc: 'Estrutura e perfil das dívidas da companhia.' },
+          capacidade_operacional: { title: 'Capacidade Operacional', desc: 'Eficiência do ciclo de vendas, recebimento e giro.' },
+          tesouraria: { title: 'Tesouraria e Capital de Giro', desc: 'Saldo financeiro disponível e necessidade de capital operacional.' },
+        };
+
+        const statusLabel = (color) => ({ green: 'Bom', yellow: 'Atenção', red: 'Crítico', '': 'Neutro' }[color] || 'Neutro');
+        const statusDot = (color) => ({ green: 'var(--green-t)', yellow: 'var(--yellow-t)', red: 'var(--red-t)', '': 'var(--t3)' }[color] || 'var(--t3)');
+
+        const splitBullets = (text) => {
+          if (!text) return [];
+          return text.split(/\.\s+|\n/).map(s => s.trim()).filter(s => s.length > 0).map(s => s.endsWith('.') ? s : s + '.');
+        };
+
+        const lcVal = indicators?.liquidez?.liquidez_corrente;
+        const lcColor = indColor('liquidez', 'liquidez_corrente', lcVal);
+        const etVal = indicators?.endividamento?.endividamento_total_pct;
+        const etColor = indColor('endividamento', 'endividamento_total_pct', etVal);
+        const cfVal = indicators?.capacidade_operacional?.ciclo_financeiro;
+        const pmrVal = indicators?.capacidade_operacional?.pmr;
+        const thirdVal = cfVal != null ? cfVal : pmrVal;
+        const thirdKey = cfVal != null ? 'ciclo_financeiro' : 'pmr';
+        const thirdLabel = cfVal != null ? 'Ciclo Financeiro' : 'PMR';
+        const thirdFormatted = cfVal != null ? days(cfVal) : days(pmrVal);
+        const thirdColor = indColor('capacidade_operacional', thirdKey, thirdVal);
+
+        return <>
+        {/* ── Stats Cards ── */}
+        <div className="dash-grid" style={{ marginBottom: 24 }}>
+          {[
+            { label: 'Ativo Total', val: f(bp?.total_ativo, brl), icon: 'ti-building-bank' },
+            { label: 'Receita / Ingressos', val: f(dsp?.receita_liquida ?? dsp?.ingressos, brl), icon: 'ti-trending-up' },
+            { label: 'EBITDA', val: f(ebitda, brl), icon: 'ti-chart-bar' },
+            { label: 'Sobras / Perdas', val: f(sobras, brl), icon: 'ti-wallet', neg: (sobras ?? 0) < 0 },
+          ].map(({ label, val, icon, neg }) => (
+            <div key={label} className="dash-card">
+              <div className="dash-card-head">
+                <span className="dash-card-label">{label}</span>
+                <i className={`ti ${icon} dash-card-icon`}></i>
               </div>
-              <table className="fin-table">
-                <thead>
-                  <tr>
-                    <th>Descrição</th>
-                    <th className="r">R$</th>
-                    <th className="r">AV%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="ft-group">
-                    <td>Ativo Circulante</td>
-                    <td className="r">{fmtT(bp.ativo_circulante)}</td>
-                    <td className="pct">{avPct(bp.ativo_circulante, totalAtivo)}</td>
-                  </tr>
-                  {bp.disponibilidades != null && <tr className="ft-sub">
-                    <td>Disponibilidades</td>
-                    <td className="r">{fmtT(bp.disponibilidades)}</td>
-                    <td className="pct">{avPct(bp.disponibilidades, totalAtivo)}</td>
-                  </tr>}
-                  {bp.clientes != null && <tr className="ft-sub">
-                    <td>Clientes / Recebíveis</td>
-                    <td className="r">{fmtT(bp.clientes)}</td>
-                    <td className="pct">{avPct(bp.clientes, totalAtivo)}</td>
-                  </tr>}
-                  {bp.estoques != null && <tr className="ft-sub">
-                    <td>Estoques</td>
-                    <td className="r">{fmtT(bp.estoques)}</td>
-                    <td className="pct">{avPct(bp.estoques, totalAtivo)}</td>
-                  </tr>}
-                  <tr className="ft-group">
-                    <td>Ativo Não Circulante</td>
-                    <td className="r">{fmtT(ancTotal)}</td>
-                    <td className="pct">{avPct(ancTotal, totalAtivo)}</td>
-                  </tr>
-                  {bp.ativo_realizavel_lp != null && <tr className="ft-sub">
-                    <td>Realizável a Longo Prazo</td>
-                    <td className="r">{fmtT(bp.ativo_realizavel_lp)}</td>
-                    <td className="pct">{avPct(bp.ativo_realizavel_lp, totalAtivo)}</td>
-                  </tr>}
-                  {bp.ativo_permanente != null && <tr className="ft-sub">
-                    <td>Ativo Permanente</td>
-                    <td className="r">{fmtT(bp.ativo_permanente)}</td>
-                    <td className="pct">{avPct(bp.ativo_permanente, totalAtivo)}</td>
-                  </tr>}
-                  <tr className="ft-total">
-                    <td>TOTAL DO ATIVO</td>
-                    <td className="r">{fmtT(bp.total_ativo)}</td>
-                    <td className="pct">100,0%</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div className="dash-card-val" style={neg ? { color: 'var(--red-t)' } : {}}>{val}</div>
             </div>
+          ))}
+        </div>
 
-            {/* PASSIVO + PL */}
-            <div className="bp-side">
-              <div className="bp-side-title">
-                Passivo + PL <span>{fmtT(bp.total_passivo_pl)}</span>
-              </div>
-              <table className="fin-table">
-                <thead>
-                  <tr>
-                    <th>Descrição</th>
-                    <th className="r">R$</th>
-                    <th className="r">AV%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="ft-group">
-                    <td>Passivo Circulante</td>
-                    <td className="r">{fmtT(bp.passivo_circulante)}</td>
-                    <td className="pct">{avPct(bp.passivo_circulante, totalAtivo)}</td>
-                  </tr>
-                  {bp.passivo_exigivel_lp != null && <tr className="ft-group">
-                    <td>Passivo Não Circulante</td>
-                    <td className="r">{fmtT(bp.passivo_exigivel_lp)}</td>
-                    <td className="pct">{avPct(bp.passivo_exigivel_lp, totalAtivo)}</td>
-                  </tr>}
-                  <tr className="ft-group">
-                    <td>Patrimônio Líquido</td>
-                    <td className="r">{fmtT(bp.patrimonio_liquido)}</td>
-                    <td className="pct">{avPct(bp.patrimonio_liquido, totalAtivo)}</td>
-                  </tr>
-                  {bp.capital_integralizado != null && <tr className="ft-sub">
-                    <td>Capital Integralizado</td>
-                    <td className="r">{fmtT(bp.capital_integralizado)}</td>
-                    <td className="pct">{avPct(bp.capital_integralizado, totalAtivo)}</td>
-                  </tr>}
-                  <tr className="ft-total">
-                    <td>TOTAL PASSIVO + PL</td>
-                    <td className="r">{fmtT(bp.total_passivo_pl)}</td>
-                    <td className="pct">100,0%</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* ── RESULTADO (DSP) ── */}
-        {tab === 'dsp' && (
-          <div className="dsp-wrap">
-            <table className="fin-table">
-              <thead>
-                <tr>
-                  <th>Descrição</th>
-                  <th className="r">R$</th>
-                  <th className="r">AV%</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="ft-group">
-                  <td>{dsp.ingressos != null ? 'Ingressos / Receita Bruta' : 'Receita Bruta'}</td>
-                  <td className="r">{fmtT(topLine)}</td>
-                  <td className="pct">{avPct(topLine, receitaRef)}</td>
-                </tr>
-                {deducoes != null && (
-                  <tr className="ft-sub">
-                    <td>(-) Impostos / Deduções</td>
-                    <td className="r">{fmtT(deducoes)}</td>
-                    <td className="pct">{avPct(deducoes, receitaRef)}</td>
-                  </tr>
-                )}
-                <tr className="ft-subtotal">
-                  <td>Receita Líquida</td>
-                  <td className="r">{fmtT(dsp.receita_liquida)}</td>
-                  <td className="pct">100,0%</td>
-                </tr>
-                {dsp.cmv != null && <tr className="ft-sub">
-                  <td>(-) CMV / CMO</td>
-                  <td className="r">{fmtT(dsp.cmv)}</td>
-                  <td className="pct">{avPct(dsp.cmv, receitaRef)}</td>
-                </tr>}
-                {resultBruto != null && <tr className="ft-subtotal">
-                  <td>Resultado Bruto</td>
-                  <td className="r">{fmtT(resultBruto)}</td>
-                  <td className="pct">{avPct(resultBruto, receitaRef)}</td>
-                </tr>}
-                {dsp.despesas_operacionais != null && <tr className="ft-sub">
-                  <td>(-) Despesas Operacionais</td>
-                  <td className="r">{fmtT(dsp.despesas_operacionais)}</td>
-                  <td className="pct">{avPct(dsp.despesas_operacionais, receitaRef)}</td>
-                </tr>}
-                {dsp.depreciacao_amortizacao != null && (
-                  <tr className="ft-sub">
-                    <td>(+) Depreciação / Amortização</td>
-                    <td className="r">{fmtT(dsp.depreciacao_amortizacao)}</td>
-                    <td className="pct">{avPct(dsp.depreciacao_amortizacao, receitaRef)}</td>
-                  </tr>
-                )}
-                <tr className="ft-ebitda">
-                  <td>EBITDA</td>
-                  <td className="r">{fmtT(ebitda)}</td>
-                  <td className="pct">{avPct(ebitda, receitaRef)}</td>
-                </tr>
-                {dsp.depreciacao_amortizacao != null && (
-                  <tr className="ft-sub">
-                    <td>(-) Depreciação / Amortização</td>
-                    <td className="r">{fmtT(dsp.depreciacao_amortizacao)}</td>
-                    <td className="pct">{avPct(dsp.depreciacao_amortizacao, receitaRef)}</td>
-                  </tr>
-                )}
-                {dsp.resultado_antes_ir != null && <tr className="ft-subtotal">
-                  <td>Resultado Antes do IR</td>
-                  <td className="r">{fmtT(dsp.resultado_antes_ir)}</td>
-                  <td className="pct">{avPct(dsp.resultado_antes_ir, receitaRef)}</td>
-                </tr>}
-                {dsp.imposto_renda != null && <tr className="ft-sub">
-                  <td>(-) Imposto de Renda / CSLL</td>
-                  <td className="r">{fmtT(dsp.imposto_renda)}</td>
-                  <td className="pct">{avPct(dsp.imposto_renda, receitaRef)}</td>
-                </tr>}
-                <tr className="ft-result">
-                  <td>SOBRAS / PERDAS</td>
-                  <td className="r" style={(sobras ?? 0) < 0 ? { color: 'var(--red-t)' } : {}}>{fmtT(sobras)}</td>
-                  <td className="pct">{avPct(sobras, receitaRef)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* ── INDICADORES ── */}
-        {tab === 'ind' && (
-          <div className="ind-grid">
-            {PILARES.slice(0, 4).map(pilar => {
-              const data = indicators?.[pilar.key] || {};
+        {/* ── Scorecard Saúde Financeira ── */}
+        <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <h2 style={{ fontSize: 20, marginBottom: 16 }}>Saúde Financeira</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+            {SCORECARD.map(({ key, label, icon }) => {
+              const r = scoreGrade(key, indicators);
+              const c = GC[r?.[0]] || GC[''];
               return (
-                <div key={pilar.key} className="ind-group">
-                  <div className="ind-group-head">
-                    <i className={`ti ${pilar.icon}`}></i>
-                    {pilar.label}
-                  </div>
-                  {pilar.items.map(({ k, label, fn }) => {
-                    const raw = data[k];
-                    return (
-                      <div key={k} className="ind-row">
-                        <span className="ind-name">{label}</span>
-                        <span className={`ind-val ${indBadge(pilar.key, k, raw)}`}>{f(raw, fn)}</span>
-                      </div>
-                    );
-                  })}
+                <div key={key} style={{ padding: 16, borderRadius: 10, border: `1px solid ${c.bd}`, background: c.bg, textAlign: 'center' }}>
+                  <i className={`ti ${icon}`} style={{ fontSize: 22, color: c.t, marginBottom: 8, display: 'block' }}></i>
+                  <div style={{ fontSize: 13, color: 'var(--t2)', marginBottom: 6 }}>{label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: c.t }}>{r?.[1] || '—'}</div>
                 </div>
               );
             })}
+          </div>
+        </div>
 
-            {/* Tesouraria — full width */}
-            {(() => {
-              const pilar = PILARES[4];
+        {/* ── 1. Sumário Executivo ── */}
+        <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '.05em' }}>✨ Sumário Executivo</span>
+          </div>
+          {narrative?.sumario ? (
+            <p style={{ fontFamily: 'var(--font-serif)', fontSize: 18, lineHeight: 1.7, color: 'var(--t0)', marginBottom: 20 }}>{narrative.sumario}</p>
+          ) : (
+            <p style={{ fontFamily: 'var(--font-serif)', fontSize: 18, lineHeight: 1.7, color: 'var(--t3)', fontStyle: 'italic', marginBottom: 20 }}>Gere o relatório com IA para visualizar o sumário executivo.</p>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            {[
+              { label: 'Liquidez Corrente', val: num(lcVal), color: lcColor },
+              { label: 'Endividamento Total', val: pct(etVal), color: etColor },
+              { label: thirdLabel, val: thirdFormatted, color: thirdColor },
+            ].map(({ label, val, color }) => {
+              const c = GC[color] || GC[''];
+              return (
+                <div key={label} style={{ padding: '14px 16px', borderRadius: 10, background: c.bg, border: `1px solid ${c.bd}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: 'var(--t0)' }}>{val}</div>
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: c.t, padding: '3px 10px', borderRadius: 100, background: c.bg, border: `1px solid ${c.bd}` }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 99, background: statusDot(color), display: 'inline-block', marginRight: 5, verticalAlign: 'middle' }}></span>{statusLabel(color)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── 2. Análise por Pilares ── */}
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 22, color: 'var(--t0)', marginBottom: 16 }}>Análise por pilares</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {PILARES.map(pilar => {
+              const pm = PILAR_META[pilar.key];
               const data = indicators?.[pilar.key] || {};
               return (
-                <div className="ind-group ind-wide">
-                  <div className="ind-group-head">
-                    <i className={`ti ${pilar.icon}`}></i>
-                    {pilar.label}
+                <div key={pilar.key} style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24 }}>
+                  <div style={{ marginBottom: 16 }}>
+                    <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)', marginBottom: 4 }}>{pm?.title || pilar.label}</h3>
+                    <p style={{ fontSize: 13, color: 'var(--t3)', margin: 0 }}>{pm?.desc || ''}</p>
                   </div>
-                  <div className="ind-inner">
-                    {pilar.items.map(({ k, label, fn }) => {
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                    {pilar.items.map(({ k, label, fn }, idx) => {
                       const raw = data[k];
+                      const color = indColor(pilar.key, k, raw);
+                      const c = GC[color] || GC[''];
+                      const meta = INDICATOR_META[k];
+                      const descText = (meta && raw != null) ? meta.desc(raw) : '';
                       return (
-                        <div key={k} className="ind-row">
-                          <span className="ind-name">{label}</span>
-                          <span className={`ind-val ${indBadge(pilar.key, k, raw)}`}>{f(raw, fn)}</span>
+                        <div key={k} style={{
+                          display: 'grid', gridTemplateColumns: '1.2fr 0.6fr 0.6fr 2fr', alignItems: 'center', gap: 12,
+                          padding: '12px 0',
+                          borderBottom: idx < pilar.items.length - 1 ? '1px solid var(--bd)' : 'none'
+                        }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t0)' }}>{label}</div>
+                            {meta && <div style={{ fontSize: 12, color: 'var(--t3)', marginTop: 2 }}>Benchmark: {meta.benchmark}</div>}
+                          </div>
+                          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 28, fontWeight: 500, color: 'var(--t0)', textAlign: 'center' }}>
+                            {f(raw, fn)}
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <span style={{ fontSize: 10, fontWeight: 600, color: statusDot(color), padding: '2px 8px', borderRadius: 100, background: c.bg, border: `1px solid ${c.bd}`, whiteSpace: 'nowrap' }}>
+                              <span style={{ width: 6, height: 6, borderRadius: 99, background: statusDot(color), display: 'inline-block', marginRight: 5, verticalAlign: 'middle' }}></span>{statusLabel(color)}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 13, color: 'var(--t2)', lineHeight: 1.5 }}>{descText}</div>
                         </div>
                       );
                     })}
                   </div>
                 </div>
               );
-            })()}
+            })}
+          </div>
+        </div>
+
+        {/* ── 3. SWOT ── */}
+        {narrative && (narrative.forcas || narrative.fraquezas || narrative.riscos) && (
+          <div style={{ marginBottom: 24 }}>
+            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 22, color: 'var(--t0)', marginBottom: 16 }}>Diagnóstico SWOT financeiro</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {[
+                { label: 'Forças', text: narrative.forcas, bg: 'rgba(20,135,78,.06)', bd: 'rgba(20,135,78,.25)', icon: 'ti-trending-up', color: 'var(--green-t)' },
+                { label: 'Oportunidades', text: null, bg: 'rgba(196,164,52,.06)', bd: 'rgba(196,164,52,.25)', icon: 'ti-sparkles', color: 'var(--gold)' },
+                { label: 'Fraquezas', text: narrative.fraquezas, bg: 'rgba(235,136,31,.06)', bd: 'rgba(235,136,31,.25)', icon: 'ti-trending-down', color: 'var(--yellow-t)' },
+                { label: 'Riscos', text: narrative.riscos, bg: 'rgba(208,29,33,.06)', bd: 'rgba(208,29,33,.25)', icon: 'ti-alert-triangle', color: 'var(--red-t)' },
+              ].map(({ label, text, bg, bd, icon, color }) => {
+                const bullets = text ? splitBullets(text) : [];
+                return (
+                  <div key={label} style={{ padding: 20, borderRadius: 12, background: bg, border: `1px solid ${bd}`, minHeight: 120 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                      <i className={`ti ${icon}`} style={{ fontSize: 18, color }}></i>
+                      <span style={{ fontSize: 14, fontWeight: 700, color }}>{label}</span>
+                    </div>
+                    {bullets.length > 0 ? (
+                      <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {bullets.map((b, i) => (
+                          <li key={i} style={{ fontSize: 13, color: 'var(--t1)', lineHeight: 1.6 }}>{b}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p style={{ fontSize: 13, color: 'var(--t3)', fontStyle: 'italic', margin: 0 }}>
+                        {label === 'Oportunidades' ? 'Oportunidades a explorar.' : 'Sem dados disponíveis.'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {/* ── RELATÓRIO ── */}
-        {tab === 'rel' && (
-          <>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              <button className={`btn${editMode ? ' btn-p' : ''}`} onClick={() => setEditMode(m => !m)}>
-                <i className={`ti ${editMode ? 'ti-check' : 'ti-edit'}`}></i>
-                {editMode ? 'Concluir edição' : 'Editar texto'}
-              </button>
-              <button className="btn btn-p" onClick={downloadReport} disabled={reporting}>
-                {reporting
-                  ? <><i className="ti ti-loader"></i> Gerando…</>
-                  : <><i className="ti ti-file-download"></i> Baixar Relatório</>}
-              </button>
-              <button className="btn" onClick={() => alert('Compartilhamento em breve.')}>
-                <i className="ti ti-share"></i> Compartilhar
-              </button>
+        {/* ── 4. Recomendações ── */}
+        {narrative?.recomendacoes && narrative.recomendacoes.length > 0 && (
+          <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 28, marginBottom: 24 }}>
+            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 22, color: 'var(--t0)', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <i className="ti ti-sparkles" style={{ color: 'var(--gold)' }}></i> Recomendações estratégicas
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {narrative.recomendacoes.map((rec, i) => {
+                const colonIdx = rec.indexOf(':');
+                const title = colonIdx > 0 ? rec.substring(0, colonIdx).replace(/^Recomendação\s*\d*\s*/i, '').trim() : `Recomendação ${i + 1}`;
+                const desc = colonIdx > 0 ? rec.substring(colonIdx + 1).trim() : rec;
+                const priority = i < 2 ? 'ALTA' : 'MÉDIA';
+                const prColor = i < 2 ? 'var(--red-t)' : 'var(--yellow-t)';
+                const prBg = i < 2 ? 'rgba(208,29,33,.08)' : 'rgba(235,136,31,.08)';
+                return (
+                  <div key={i} style={{ padding: '24px 0', borderTop: i > 0 ? '1px solid var(--bd)' : 'none', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 32, color: 'var(--t3)', lineHeight: 1, flexShrink: 0, width: 40, textAlign: 'right' }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                        <span style={{ fontFamily: 'var(--font-serif)', fontSize: 17, color: 'var(--t0)' }}>{title}</span>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: prColor, padding: '3px 10px', borderRadius: 100, background: prBg, letterSpacing: '.06em', flexShrink: 0 }}>{priority}</span>
+                      </div>
+                      <p style={{ fontSize: 14, color: 'var(--t2)', lineHeight: 1.7, margin: 0 }}>{desc}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-
-            <div className="report-doc">
-              <div className="report-header">
-                <div className="report-title">Análise Financeira — {analysis.year}</div>
-                <div className="report-meta">
-                  <span><i className="ti ti-building"></i> {analysis.client_name}</span>
-                  <span><i className="ti ti-calendar"></i> Exercício {analysis.year}</span>
-                  {analysis.confidence != null && (
-                    <span><i className="ti ti-sparkles"></i> Extração {(analysis.confidence * 100).toFixed(0)}% confiança</span>
-                  )}
-                </div>
-              </div>
-
-              {REPORT_SECTIONS.map(({ key, title }) => (
-                <div key={key} className="report-section">
-                  <div className="report-section-title">{title}</div>
-                  {editMode ? (
-                    <textarea
-                      className="report-textarea"
-                      value={narrative[key] || ''}
-                      onChange={e => setNarrative(n => ({ ...n, [key]: e.target.value }))}
-                      placeholder="Digite o texto desta seção…"
-                    />
-                  ) : (
-                    <p className="report-p">
-                      {narrative[key] || (
-                        <em style={{ color: 'var(--t2)' }}>
-                          Sem texto. Clique em "Editar texto" para adicionar.
-                        </em>
-                      )}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
+          </div>
         )}
-      </div>
+
+        {/* ── 5. Footer ── */}
+        <p style={{ fontSize: 12, color: 'var(--t3)', textAlign: 'center', marginTop: 32, marginBottom: 0 }}>
+          Relatório gerado por SynerCoop · IA assistida · Revise antes de enviar ao cliente
+        </p>
+        </>;
+      })()}
+
+      {/* ═══ TAB: RELATÓRIO ═══ */}
+      {tab === 'relatorio' && (
+        <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 28 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h2 style={{ fontSize: 20 }}>Relatório de Análise</h2>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {narrative && <>
+                <button className="btn" onClick={() => editMode ? saveNarrative() : setEditMode(true)} disabled={saving}>
+                  <i className={`ti ${editMode ? 'ti-check' : 'ti-edit'}`}></i>
+                  {editMode ? (saving ? 'Salvando…' : 'Salvar') : 'Editar'}
+                </button>
+                {editMode && <button className="btn" onClick={() => setEditMode(false)}>Cancelar</button>}
+              </>}
+            </div>
+          </div>
+
+          {!narrative ? (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <i className="ti ti-file-text" style={{ fontSize: 36, color: 'var(--t3)', display: 'block', marginBottom: 12 }}></i>
+              <p style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 16 }}>O relatório não foi gerado automaticamente. Clique abaixo para gerar agora.</p>
+              <button className="btn btn-p" onClick={generateNarrativeAI} disabled={genNarrative}>
+                {genNarrative ? <><i className="ti ti-loader" style={{ animation: 'spin .8s linear infinite' }}></i> Gerando…</> : <><i className="ti ti-sparkles"></i> Gerar Relatório com IA</>}
+              </button>
+            </div>
+          ) : <>
+            <div style={{ borderBottom: '2px solid var(--blue)', paddingBottom: 12, marginBottom: 20 }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: 20, color: 'var(--t0)' }}>Relatório de Análise de Desempenho Financeiro</div>
+              <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 4 }}>{analysis.client_name} · Exercício {analysis.year}</div>
+            </div>
+
+            {REPORT_SECTIONS.map(({ key, title, heading, divider }) => {
+              if (key.startsWith('_h_')) {
+                return (
+                  <div key={key} style={{ marginTop: divider ? 32 : 0, marginBottom: 16 }}>
+                    <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>{title}</h3>
+                  </div>
+                );
+              }
+              return (
+                <div key={key} style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--blue-text)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {title}<div style={{ flex: 1, height: 1, background: 'var(--bd)' }}></div>
+                  </div>
+                  {editMode
+                    ? <AutoTextarea value={narrative[key] || ''} onChange={e => updateNarrative(key, e.target.value)} placeholder="Digite o texto desta seção..." />
+                    : <p style={{ fontSize: 14, lineHeight: 1.75, color: 'var(--t1)' }}>{narrative[key] || <em style={{ color: 'var(--t3)' }}>Sem conteúdo.</em>}</p>}
+                </div>
+              );
+            })}
+
+            <div style={{ marginTop: 32, marginBottom: 20 }}>
+              <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)', marginBottom: 16 }}>Recomendações Estratégicas</h3>
+              {editMode
+                ? <AutoTextarea value={(narrative.recomendacoes || []).join('\n')} onChange={e => updateNarrative('recomendacoes', e.target.value.split('\n').filter(l => l.trim()))} placeholder="Uma recomendação por linha..." />
+                : <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {(narrative.recomendacoes || []).map((r, i) => (
+                      <li key={i} style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--t1)', display: 'flex', gap: 8, padding: '8px 12px', background: 'var(--bg2)', borderRadius: 6 }}>
+                        <span style={{ color: 'var(--gold)', fontWeight: 600, flexShrink: 0 }}>{i + 1}.</span>{r}
+                      </li>
+                    ))}
+                  </ul>}
+            </div>
+          </>}
+        </div>
+      )}
+
+      {/* ═══ TAB: INDICADORES ═══ */}
+      {tab === 'indicadores' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {PILARES.map(pilar => {
+            const data = indicators?.[pilar.key] || {};
+            return (
+              <div key={pilar.key} style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--bd)' }}>
+                  <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>{pilar.label}</div>
+                </div>
+                <table className="fin-table">
+                  <thead><tr><th>Indicador</th><th className="r">Valor</th><th className="r">Status</th></tr></thead>
+                  <tbody>
+                    {pilar.items.map(({ k, label, fn }) => {
+                      const raw = data[k]; const color = indColor(pilar.key, k, raw); const c = GC[color] || GC[''];
+                      const sl = { green: 'Bom', yellow: 'Atenção', red: 'Crítico', '': '—' }[color] || '—';
+                      return (
+                        <tr key={k}>
+                          <td>{label}</td>
+                          <td className="r">{f(raw, fn)}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 12, fontWeight: 500, color: c.t, padding: '3px 10px', borderRadius: 100, background: c.bg, display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: 99, background: c.t, flexShrink: 0 }}></span>{sl}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ═══ TAB: BALANÇO PATRIMONIAL ═══ */}
+      {tab === 'bp' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--bd)' }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>Ativo</div>
+            </div>
+            <table className="fin-table">
+              <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
+              <tbody>
+                <tr className="ft-group"><td>Ativo Circulante</td><td className="r">{fmtT(bp.ativo_circulante)}</td><td className="pct">{avPct(bp.ativo_circulante, totalAtivo)}</td></tr>
+                {bp.disponibilidades != null && <tr className="ft-sub"><td>Disponibilidades</td><td className="r">{fmtT(bp.disponibilidades)}</td><td className="pct">{avPct(bp.disponibilidades, totalAtivo)}</td></tr>}
+                {bp.clientes != null && <tr className="ft-sub"><td>Clientes / Recebíveis</td><td className="r">{fmtT(bp.clientes)}</td><td className="pct">{avPct(bp.clientes, totalAtivo)}</td></tr>}
+                {bp.estoques != null && <tr className="ft-sub"><td>Estoques</td><td className="r">{fmtT(bp.estoques)}</td><td className="pct">{avPct(bp.estoques, totalAtivo)}</td></tr>}
+                <tr className="ft-group"><td>Ativo Não Circulante</td><td className="r">{fmtT(ancTotal)}</td><td className="pct">{avPct(ancTotal, totalAtivo)}</td></tr>
+                {bp.ativo_permanente != null && <tr className="ft-sub"><td>Ativo Permanente</td><td className="r">{fmtT(bp.ativo_permanente)}</td><td className="pct">{avPct(bp.ativo_permanente, totalAtivo)}</td></tr>}
+                <tr className="ft-total"><td>TOTAL DO ATIVO</td><td className="r">{fmtT(bp.total_ativo)}</td><td className="pct">100,0%</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--bd)' }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>Passivo + Patrimônio Líquido</div>
+            </div>
+            <table className="fin-table">
+              <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
+              <tbody>
+                <tr className="ft-group"><td>Passivo Circulante</td><td className="r">{fmtT(bp.passivo_circulante)}</td><td className="pct">{avPct(bp.passivo_circulante, totalAtivo)}</td></tr>
+                {bp.passivo_exigivel_lp != null && <tr className="ft-group"><td>Passivo Não Circulante</td><td className="r">{fmtT(bp.passivo_exigivel_lp)}</td><td className="pct">{avPct(bp.passivo_exigivel_lp, totalAtivo)}</td></tr>}
+                <tr className="ft-group"><td>Patrimônio Líquido</td><td className="r">{fmtT(bp.patrimonio_liquido)}</td><td className="pct">{avPct(bp.patrimonio_liquido, totalAtivo)}</td></tr>
+                <tr className="ft-total"><td>TOTAL PASSIVO + PL</td><td className="r">{fmtT(bp.total_passivo_pl)}</td><td className="pct">100,0%</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ TAB: DSP ═══ */}
+      {tab === 'dsp' && (
+        <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--bd)' }}>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>Demonstração de Sobras e Perdas</div>
+          </div>
+          <table className="fin-table">
+            <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
+            <tbody>
+              <tr className="ft-group"><td>{dsp.ingressos != null ? 'Ingressos / Receita Bruta' : 'Receita Bruta'}</td><td className="r">{fmtT(dsp.ingressos ?? dsp.receita_bruta)}</td><td className="pct">{avPct(dsp.ingressos ?? dsp.receita_bruta, receitaRef)}</td></tr>
+              <tr className="ft-subtotal"><td>Receita Líquida</td><td className="r">{fmtT(dsp.receita_liquida)}</td><td className="pct">100,0%</td></tr>
+              {dsp.cmv != null && <tr className="ft-sub"><td>(-) CMV / CMO</td><td className="r">{fmtT(dsp.cmv)}</td><td className="pct">{avPct(dsp.cmv, receitaRef)}</td></tr>}
+              {dsp.lucro_bruto != null && <tr className="ft-subtotal"><td>Resultado Bruto</td><td className="r">{fmtT(dsp.lucro_bruto)}</td><td className="pct">{avPct(dsp.lucro_bruto, receitaRef)}</td></tr>}
+              {dsp.despesas_operacionais != null && <tr className="ft-sub"><td>(-) Despesas Operacionais</td><td className="r">{fmtT(dsp.despesas_operacionais)}</td><td className="pct">{avPct(dsp.despesas_operacionais, receitaRef)}</td></tr>}
+              <tr className="ft-ebitda"><td>EBITDA</td><td className="r">{fmtT(ebitda)}</td><td className="pct">{avPct(ebitda, receitaRef)}</td></tr>
+              {dsp.resultado_antes_ir != null && <tr className="ft-subtotal"><td>Resultado Antes do IR</td><td className="r">{fmtT(dsp.resultado_antes_ir)}</td><td className="pct">{avPct(dsp.resultado_antes_ir, receitaRef)}</td></tr>}
+              <tr className="ft-result"><td>SOBRAS / PERDAS</td><td className="r" style={(sobras ?? 0) < 0 ? { color: 'var(--red-t)' } : {}}>{fmtT(sobras)}</td><td className="pct">{avPct(sobras, receitaRef)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {confirm && <ConfirmModal {...confirm} onClose={() => setConfirm(null)} />}
-    </>
+    </div>
   );
 }

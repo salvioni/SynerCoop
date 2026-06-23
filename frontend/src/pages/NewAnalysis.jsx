@@ -1,268 +1,216 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { api, uploadFile, ApiError } from '../lib/api.js';
 
-const STEPS = ['Selecionar cliente', 'Enviar arquivo', 'Confirmar e salvar'];
+const STEPS = [
+  { n: 1, label: 'Cliente' },
+  { n: 2, label: 'Upload' },
+  { n: 3, label: 'Processamento' },
+];
 
 export default function NewAnalysis() {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const preselectedClientId = params.get('clientId');
+  const [step, setStep] = useState(1);
 
-  const [step, setStep] = useState(preselectedClientId ? 1 : 0);
   const [clients, setClients] = useState([]);
-  const [selectedClientId, setSelectedClientId] = useState(preselectedClientId || '');
-  const [clientSearch, setClientSearch] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [search, setSearch] = useState('');
+  const [loadingClients, setLoadingClients] = useState(true);
+
   const [file, setFile] = useState(null);
-  const [dragging, setDragging] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-  const [extracted, setExtracted] = useState(null);
-  const [extractErr, setExtractErr] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [saveErr, setSaveErr] = useState('');
+  const [drag, setDrag] = useState(false);
+  const [err, setErr] = useState('');
+  const [processing, setProcessing] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
-    api.get('/clients').then(d => setClients(d.clients || [])).catch(() => {});
+    api.get('/clients').then(r => setClients(r.clients || []))
+      .catch(() => {})
+      .finally(() => setLoadingClients(false));
   }, []);
 
-  const selectedClient = clients.find(c => c.id === selectedClientId);
-  const filteredClients = clients.filter(c =>
-    !clientSearch || c.name.toLowerCase().includes(clientSearch.toLowerCase())
+  const filtered = clients.filter(c =>
+    !search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.cnpj || '').includes(search)
   );
 
-  // Step 1: file select
-  function onFileSelect(f) {
+  const selectedClient = clients.find(c => c.id === clientId);
+
+  function selectFile(f) {
     if (!f) return;
-    const allowed = ['.pdf', '.xlsx', '.xls'];
-    const ext = '.' + f.name.split('.').pop().toLowerCase();
-    if (!allowed.includes(ext)) { setExtractErr(`Formato não suportado: ${ext}. Use PDF, XLSX ou XLS.`); return; }
-    if (f.size > 10 * 1024 * 1024) { setExtractErr('Arquivo muito grande. Limite: 10MB.'); return; }
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (!['pdf', 'xlsx', 'xls'].includes(ext)) {
+      setErr('Formato não suportado. Use PDF, XLSX ou XLS.');
+      return;
+    }
     setFile(f);
-    setExtractErr('');
-    setExtracted(null);
+    setErr('');
   }
 
-  async function doExtract() {
-    if (!file || !selectedClientId) return;
-    setExtracting(true);
-    setExtractErr('');
+  async function doAnalyze() {
+    if (!file || !clientId) return;
+    setProcessing(true);
+    setStep(3);
+    setErr('');
     try {
-      const r = await uploadFile(`/clients/${selectedClientId}/extract`, file);
-      setExtracted(r.extracted);
-      setStep(2);
-    } catch (e) {
-      setExtractErr(e.message || 'Erro ao processar o arquivo.');
-    } finally { setExtracting(false); }
-  }
-
-  async function doSave() {
-    if (!extracted || !selectedClientId) return;
-    setSaving(true);
-    setSaveErr('');
-    try {
-      const r = await uploadFile(`/clients/${selectedClientId}/analyses`, file, {
-        year: extracted.year,
-        confidence: extracted.confidence,
-        notes: extracted.notes,
+      const r = await uploadFile(`/clients/${clientId}/extract`, file);
+      const ex = r.extracted;
+      const bpClean = {};
+      const dspClean = {};
+      Object.entries(ex.bp || {}).forEach(([k, v]) => { if (v != null) bpClean[k] = Number(v) || 0; });
+      Object.entries(ex.dsp || {}).forEach(([k, v]) => { if (v != null) dspClean[k] = Number(v) || 0; });
+      const saved = await api.post(`/clients/${clientId}/analyses`, {
+        bp: bpClean, dsp: dspClean, year: ex.year || new Date().getFullYear(),
+        confidence: ex.confidence, notes: ex.notes,
       });
-      navigate(`/app/analyses/${r.analysis.id}`);
+      navigate(`/app/analyses/${saved.analysis.id}`, { replace: true });
     } catch (e) {
-      if (e instanceof ApiError && e.status === 400 && e.message?.includes('Já existe')) {
-        setSaveErr(e.message);
-      } else {
-        setSaveErr(e.message || 'Erro ao salvar análise.');
-      }
-    } finally { setSaving(false); }
+      setErr(e instanceof ApiError ? e.message : 'Erro ao processar. Tente novamente.');
+      setProcessing(false);
+      setStep(2);
+    }
   }
-
-  const confidenceLabel = (c) => {
-    if (!c) return null;
-    if (c >= 0.85) return { label: 'Alta', cls: 'confidence-high' };
-    if (c >= 0.6)  return { label: 'Média', cls: 'confidence-medium' };
-    return { label: 'Baixa', cls: 'confidence-low' };
-  };
 
   return (
-    <div style={{ maxWidth: 640, margin: '0 auto' }}>
-      <button className="back-btn" onClick={() => navigate(-1)}>
+    <div className="page-body" style={{ padding: '40px 32px', maxWidth: 680, margin: '0 auto', width: '100%' }}>
+      <button className="back" onClick={() => navigate(-1)} style={{ marginBottom: 16 }}>
         <i className="ti ti-arrow-left"></i> Voltar
       </button>
 
-      <div className="ph" style={{ marginTop: '.75rem' }}>
-        <div>
-          <h1 className="pt">Nova análise financeira</h1>
-          <div className="ps">Envie um arquivo PDF ou Excel com os dados financeiros</div>
-        </div>
-      </div>
+      <h1 style={{ marginBottom: 8 }}>Nova análise</h1>
+      <p style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 32 }}>
+        Suba o balanço da empresa cliente — a IA extrai os dados e calcula os indicadores.
+      </p>
 
-      {/* Step wizard */}
-      <div className="step-wizard" style={{ marginBottom: '1.5rem' }}>
-        {STEPS.map((label, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : 0 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <div className={`step-circle ${i === step ? 'step-item active' : i < step ? 'step-item done' : ''}`}
-                style={{ width: 28, height: 28, borderRadius: '50%', border: `2px solid ${i <= step ? '#1D9E75' : 'var(--color-border-secondary)'}`, background: i === step ? '#1D9E75' : i < step ? 'var(--color-background-success)' : 'var(--color-background-primary)', color: i === step ? '#fff' : i < step ? 'var(--color-text-success)' : 'var(--color-text-tertiary)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {i < step ? <i className="ti ti-check"></i> : i + 1}
+      {/* Stepper */}
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 40 }}>
+        {STEPS.map((s, i) => (
+          <div key={s.n} style={{ display: 'contents' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 14, fontWeight: 500,
+                background: step >= s.n ? 'var(--blue)' : 'var(--bg2)',
+                color: step >= s.n ? '#fff' : 'var(--t3)',
+                border: step >= s.n ? 'none' : '1px solid var(--bd)',
+              }}>
+                {step > s.n ? <i className="ti ti-check" style={{ fontSize: 16 }}></i> : s.n}
               </div>
-              <span style={{ fontSize: 11, color: i === step ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', fontWeight: i === step ? 500 : 400, whiteSpace: 'nowrap' }}>
-                {label}
+              <span style={{ fontSize: 14, fontWeight: step === s.n ? 500 : 400, color: step >= s.n ? 'var(--t0)' : 'var(--t3)' }}>
+                {s.label}
               </span>
             </div>
             {i < STEPS.length - 1 && (
-              <div style={{ flex: 1, height: 1, background: i < step ? '#1D9E75' : 'var(--color-border-tertiary)', margin: '0 8px', marginBottom: 20 }} />
+              <div style={{ flex: 1, height: 1, margin: '0 16px', background: step > s.n ? 'var(--blue)' : 'var(--bd)' }}></div>
             )}
           </div>
         ))}
       </div>
 
-      {/* Step 0: Select client */}
-      {step === 0 && (
-        <div className="card">
-          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: '1rem' }}>Selecione o cliente</div>
-          <div className="filter-group" style={{ marginBottom: '1rem' }}>
-            <div className="filter-icon"><i className="ti ti-search"></i></div>
-            <input className="filter-text" placeholder="Buscar cliente…"
-              value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
+      {err && <div className="err-banner" style={{ marginBottom: 16 }}>{err}</div>}
+
+      {/* Step 1: Select client */}
+      {step === 1 && (
+        <div>
+          <div className="cl-search" style={{ marginBottom: 16 }}>
+            <i className="ti ti-search"></i>
+            <input className="inp" placeholder="Buscar cliente ou CNPJ..."
+              value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <div style={{ maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {filteredClients.map(c => (
-              <div key={c.id} onClick={() => setSelectedClientId(c.id)}
-                style={{ padding: '10px 14px', borderRadius: 'var(--border-radius-md)', border: `1.5px solid ${selectedClientId === c.id ? '#1D9E75' : 'var(--color-border-tertiary)'}`, background: selectedClientId === c.id ? 'var(--color-background-success)' : 'var(--color-background-primary)', cursor: 'pointer', transition: '.15s' }}>
-                <div style={{ fontWeight: 500, fontSize: 13 }}>{c.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{c.type}{c.cnpj ? ` · ${c.cnpj}` : ''}</div>
-              </div>
-            ))}
-            {!filteredClients.length && (
-              <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: 13, padding: '1rem' }}>
-                Nenhum cliente encontrado.
-              </div>
-            )}
-          </div>
-          <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button className="btn" onClick={() => navigate('/app/clients')}>Cancelar</button>
-            <button className="btn btn-p" disabled={!selectedClientId} onClick={() => setStep(1)}>
-              Continuar <i className="ti ti-arrow-right"></i>
-            </button>
-          </div>
+
+          {loadingClients ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>Carregando...</div>
+          ) : !filtered.length ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>
+              {search ? 'Nenhum cliente encontrado.' : 'Nenhum cliente cadastrado.'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {filtered.map(c => (
+                <button key={c.id} onClick={() => { setClientId(c.id); setStep(2); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+                    background: 'var(--bg1)', border: '1px solid var(--bd)',
+                    borderRadius: 8, cursor: 'pointer', textAlign: 'left', width: '100%',
+                    transition: 'border-color .12s',
+                  }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 8, background: 'var(--blue)', color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 500, flexShrink: 0,
+                  }}>
+                    {c.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t0)' }}>{c.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--t2)', marginTop: 2 }}>
+                      {c.type}{c.cnpj ? ` · ${c.cnpj}` : ''}
+                    </div>
+                  </div>
+                  <i className="ti ti-chevron-right" style={{ color: 'var(--t3)' }}></i>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Step 1: Upload */}
-      {step === 1 && (
+      {/* Step 2: Upload */}
+      {step === 2 && (
         <div>
-          {selectedClient && (
-            <div className="lnot" style={{ marginBottom: '1rem' }}>
-              <i className="ti ti-building"></i>
-              <span>Cliente: <strong>{selectedClient.name}</strong></span>
-            </div>
-          )}
+          <div style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <i className="ti ti-building" style={{ fontSize: 16 }}></i>
+            <span style={{ fontWeight: 500, color: 'var(--t0)' }}>{selectedClient?.name}</span>
+            <button onClick={() => setStep(1)} style={{ background: 'none', border: 'none', color: 'var(--t2)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
+              trocar
+            </button>
+          </div>
 
           <div
-            className={`upload-area ${dragging ? 'drag-over' : ''}`}
-            onDragOver={e => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={e => { e.preventDefault(); setDragging(false); onFileSelect(e.dataTransfer.files[0]); }}
+            className={`upload-zone${drag ? ' drag' : ''}`}
+            onDragOver={e => { e.preventDefault(); setDrag(true); }}
+            onDragLeave={() => setDrag(false)}
+            onDrop={e => { e.preventDefault(); setDrag(false); selectFile(e.dataTransfer.files[0]); }}
             onClick={() => fileRef.current?.click()}
           >
             <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls"
-              onChange={e => onFileSelect(e.target.files[0])} />
-            <div className="upload-area-icon">
-              <i className={`ti ${file ? 'ti-file-check' : 'ti-upload'}`}></i>
-            </div>
+              onChange={e => selectFile(e.target.files[0])} />
+            <div className="uz-icon"><i className="ti ti-cloud-upload"></i></div>
             {file ? (
               <>
-                <div className="upload-area-text" style={{ color: 'var(--color-text-success)' }}>{file.name}</div>
-                <div className="upload-area-sub">{(file.size / 1024).toFixed(0)} KB · Clique para trocar</div>
+                <div className="uz-title uz-file"><i className="ti ti-file-check"></i> {file.name}</div>
+                <div className="uz-sub">Clique para trocar o arquivo</div>
               </>
             ) : (
               <>
-                <div className="upload-area-text">Arraste ou clique para enviar</div>
-                <div className="upload-area-sub">PDF, XLSX ou XLS — máximo 10MB</div>
+                <div className="uz-title">Arraste o arquivo aqui ou clique para selecionar</div>
+                <div className="uz-sub">PDF, XLSX ou XLS · máx. 50 MB</div>
               </>
             )}
           </div>
 
-          {extractErr && <div className="form-err" style={{ marginTop: '1rem' }}>{extractErr}</div>}
+          {file && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+              <button className="btn" style={{ flex: 1, justifyContent: 'center' }}
+                onClick={() => { setFile(null); setErr(''); }}>
+                Remover
+              </button>
+              <button className="btn btn-p" style={{ flex: 2, justifyContent: 'center' }}
+                onClick={doAnalyze}>
+                <i className="ti ti-sparkles"></i> Analisar arquivo
+              </button>
+            </div>
+          )}
 
-          <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-            <button className="btn" onClick={() => { setStep(0); setFile(null); setExtractErr(''); }}>
-              <i className="ti ti-arrow-left"></i> Voltar
-            </button>
-            <button className="btn btn-p" disabled={!file || extracting} onClick={doExtract}>
-              {extracting ? <><i className="ti ti-loader"></i> Processando…</> : <><i className="ti ti-sparkles"></i> Extrair com IA</>}
-            </button>
-          </div>
         </div>
       )}
 
-      {/* Step 2: Review and save */}
-      {step === 2 && extracted && (
-        <div>
-          <div className="card" style={{ marginBottom: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '.75rem' }}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>Dados extraídos — {extracted.year}</div>
-              {confidenceLabel(extracted.confidence) && (
-                <span className={`sb ${confidenceLabel(extracted.confidence).cls}`}>
-                  Confiança {confidenceLabel(extracted.confidence).label}
-                </span>
-              )}
-            </div>
-            {extracted.notes && (
-              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: '.75rem' }}>
-                <i className="ti ti-info-circle"></i> {extracted.notes}
-              </div>
-            )}
-
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>
-              Balanço Patrimonial — resumo
-            </div>
-            <div className="mrow" style={{ marginBottom: '1rem' }}>
-              {[
-                { label: 'Ativo Total', val: extracted.bp?.total_ativo },
-                { label: 'Ativo Circulante', val: extracted.bp?.ativo_circulante },
-                { label: 'Passivo Circulante', val: extracted.bp?.passivo_circulante },
-                { label: 'Patrimônio Líquido', val: extracted.bp?.patrimonio_liquido },
-              ].map(({ label, val }) => (
-                <div key={label} className="mc">
-                  <div className="ml">{label}</div>
-                  <div className="mv" style={{ fontSize: 16 }}>
-                    {val != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact' }).format(val) : '—'}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>
-              DSP — resumo
-            </div>
-            <div className="mrow">
-              {[
-                { label: 'Receita Bruta', val: extracted.dsp?.receita_bruta },
-                { label: 'Receita Líquida', val: extracted.dsp?.receita_liquida },
-                { label: 'EBITDA', val: extracted.dsp?.ebitda },
-                { label: 'Sobras/Perdas', val: extracted.dsp?.sobras_perdas },
-              ].map(({ label, val }) => (
-                <div key={label} className="mc">
-                  <div className="ml">{label}</div>
-                  <div className="mv" style={{ fontSize: 16, color: val != null && val < 0 ? 'var(--color-text-danger)' : undefined }}>
-                    {val != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact' }).format(val) : '—'}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {saveErr && <div className="form-err" style={{ marginBottom: '1rem' }}>{saveErr}</div>}
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-            <button className="btn" onClick={() => setStep(1)}>
-              <i className="ti ti-arrow-left"></i> Voltar
-            </button>
-            <button className="btn btn-p" disabled={saving} onClick={doSave}>
-              {saving ? 'Salvando…' : <><i className="ti ti-device-floppy"></i> Salvar análise</>}
-            </button>
-          </div>
+      {/* Step 3: Processing */}
+      {step === 3 && (
+        <div style={{ padding: '60px 0', textAlign: 'center' }}>
+          <i className="ti ti-loader" style={{ fontSize: 40, color: 'var(--gold)', display: 'block', marginBottom: 16, animation: 'spin .8s linear infinite' }}></i>
+          <div style={{ fontSize: 16, fontWeight: 500, color: 'var(--t0)', marginBottom: 8 }}>Processando análise...</div>
+          <p style={{ fontSize: 14, color: 'var(--t2)' }}>
+            Extraindo dados e calculando indicadores de <strong>{selectedClient?.name}</strong>
+          </p>
         </div>
       )}
     </div>
