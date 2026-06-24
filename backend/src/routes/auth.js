@@ -184,10 +184,10 @@ router.post('/login', loginLimit, async (req, res, next) => {
     }
 
     const tenant = user.tenant_id
-      ? await db.prepare('SELECT plan FROM tenants WHERE id = ?').get(user.tenant_id)
+      ? await db.prepare('SELECT name, plan FROM tenants WHERE id = ?').get(user.tenant_id)
       : null;
     const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    const safeUser = { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role, plan: tenant?.plan || null };
+    const safeUser = { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role, plan: tenant?.plan || null, tenant_name: tenant?.name || null };
     res.json({ token, user: safeUser });
   } catch (e) { next(e); }
 });

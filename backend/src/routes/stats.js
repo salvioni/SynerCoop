@@ -23,6 +23,14 @@ router.get('/', async (req, res, next) => {
       JOIN clients c ON c.id = a.client_id WHERE c.tenant_id = ?
     `).get(tenantId);
 
+    const monthlyAnalyses = await db.prepare(`
+      SELECT COUNT(*) AS cnt FROM analyses a
+      JOIN clients c ON c.id = a.client_id
+      WHERE c.tenant_id = ? AND a.created_at >= date('now', 'start of month')
+    `).get(tenantId);
+
+    const tenant = await db.prepare('SELECT plan FROM tenants WHERE id = ?').get(tenantId);
+
     // Last 12 months of analyses
     const byMonth = await db.prepare(`
       SELECT strftime('%Y-%m', a.created_at) AS month, COUNT(*) AS cnt
@@ -45,6 +53,8 @@ router.get('/', async (req, res, next) => {
       totalClients: totalClients?.cnt || 0,
       activeClients: activeClients?.cnt || 0,
       totalAnalyses: totalAnalyses?.cnt || 0,
+      monthlyAnalyses: monthlyAnalyses?.cnt || 0,
+      plan: tenant?.plan || 'trial',
       byMonth,
       recentAnalyses,
     });

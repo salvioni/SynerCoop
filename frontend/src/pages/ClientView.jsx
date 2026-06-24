@@ -131,7 +131,7 @@ export default function ClientView() {
   const hasMultiple = parsed.length > 1;
 
   return (
-    <div className="page-body" style={{ padding: '40px 32px' }}>
+    <div className="page-body">
       <button className="back" onClick={() => navigate('/app/clients')} style={{ marginBottom: 16 }}>
         <i className="ti ti-arrow-left"></i> Clientes
       </button>
@@ -169,7 +169,7 @@ export default function ClientView() {
 
       {/* Charts row — evolution + composition */}
       {latest && (
-        <div style={{ display: 'grid', gridTemplateColumns: hasMultiple ? '1.5fr 1fr' : '1fr 1fr', gap: 16, marginBottom: 24 }}>
+        <div className="grid-2" style={{ marginBottom: 24 }}>
           {hasMultiple ? (
             <ChartCard title="Evolução patrimonial" subtitle="Por exercício">
               <ResponsiveContainer width="100%" height={260}>
@@ -186,40 +186,16 @@ export default function ClientView() {
             </ChartCard>
           ) : (
             <ChartCard title="Composição do Ativo" subtitle={`Exercício ${latest.year}`}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-                <ResponsiveContainer width="50%" height={200}>
-                  <PieChart>
-                    <Pie data={compositionData} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={45} paddingAngle={2}>
-                      {compositionData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip content={<CustomTooltip />} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {compositionData.map((d, i) => (
-                    <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                      <div style={{ width: 10, height: 10, borderRadius: 2, background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }}></div>
-                      <span style={{ color: 'var(--t2)' }}>{d.name}</span>
-                      <span style={{ fontWeight: 500, color: 'var(--t0)', marginLeft: 'auto' }}>{FMT.format(d.value)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </ChartCard>
-          )}
-
-          <ChartCard title="Resultado (DSP)" subtitle={`Exercício ${latest.year}`}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-              <ResponsiveContainer width="50%" height={200}>
+              <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
-                  <Pie data={dspData} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={45} paddingAngle={2}>
-                    {dspData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  <Pie data={compositionData} dataKey="value" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
+                    {compositionData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                   </Pie>
                   <Tooltip content={<CustomTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {dspData.map((d, i) => (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+                {compositionData.map((d, i) => (
                   <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                     <div style={{ width: 10, height: 10, borderRadius: 2, background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }}></div>
                     <span style={{ color: 'var(--t2)' }}>{d.name}</span>
@@ -227,6 +203,26 @@ export default function ClientView() {
                   </div>
                 ))}
               </div>
+            </ChartCard>
+          )}
+
+          <ChartCard title="Resultado (DSP)" subtitle={`Exercício ${latest.year}`}>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={dspData} dataKey="value" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
+                  {dspData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                </Pie>
+                <Tooltip content={<CustomTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+              {dspData.map((d, i) => (
+                <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 2, background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }}></div>
+                  <span style={{ color: 'var(--t2)' }}>{d.name}</span>
+                  <span style={{ fontWeight: 500, color: 'var(--t0)', marginLeft: 'auto' }}>{FMT.format(d.value)}</span>
+                </div>
+              ))}
             </div>
           </ChartCard>
         </div>
@@ -259,7 +255,7 @@ export default function ClientView() {
             <h3 style={{ fontSize: 16 }}>Indicadores-chave</h3>
             <span style={{ fontSize: 12, color: 'var(--t2)' }}>Exercício {latest.year}</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          <div className="grid-3">
             {KEY_IND.map(({ label, val, good }) => (
               <div key={label} style={{ padding: '12px 16px', background: 'var(--bg2)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 6 }}>{label}</div>

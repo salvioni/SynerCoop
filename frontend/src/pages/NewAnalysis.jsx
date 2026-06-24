@@ -71,7 +71,7 @@ export default function NewAnalysis() {
   }
 
   return (
-    <div className="page-body" style={{ padding: '40px 32px', maxWidth: 680, margin: '0 auto', width: '100%' }}>
+    <div className="page-body" style={{ maxWidth: 680, margin: '0 auto', width: '100%' }}>
       <button className="back" onClick={() => navigate(-1)} style={{ marginBottom: 16 }}>
         <i className="ti ti-arrow-left"></i> Voltar
       </button>

@@ -12,7 +12,7 @@ const router = Router();
 router.get('/', authRequired, async (req, res, next) => {
   try {
     const rows = await db.prepare(`
-      SELECT u.id, u.name, u.email, u.role,
+      SELECT u.id, u.name, u.email, u.role, u.avatar, u.avatar_color,
         EXISTS(SELECT 1 FROM invites i WHERE i.user_id = u.id AND i.used_at IS NULL) AS invite_pending
       FROM users u
       WHERE u.tenant_id = ?

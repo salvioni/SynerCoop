@@ -162,18 +162,18 @@ export default function AnalysisView() {
   const ancTotal = (bp.ativo_realizavel_lp ?? 0) + (bp.ativo_permanente ?? 0) || (bp.total_ativo && bp.ativo_circulante ? bp.total_ativo - bp.ativo_circulante : null);
 
   return (
-    <div className="page-body" style={{ padding: '40px 32px', maxWidth: 1000, margin: '0 auto', width: '100%' }}>
+    <div className="page-body" style={{ maxWidth: 1000, margin: '0 auto', width: '100%' }}>
       {/* Header */}
       <button className="back" onClick={() => navigate(`/app/clients/${analysis.client_id}`)} style={{ marginBottom: 16 }}>
         <i className="ti ti-arrow-left"></i> {analysis.client_name}
       </button>
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
-        <div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
           <p style={{ fontSize: 14, color: 'var(--t2)' }}>{analysis.client_name} · Exercício {analysis.year}</p>
           <h1>Análise Financeira</h1>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
           <button className="btn btn-p" onClick={downloadReport} disabled={reporting}>
             {reporting ? <><i className="ti ti-loader"></i> Gerando…</> : <><i className="ti ti-file-download"></i> Baixar DOCX</>}
           </button>
@@ -194,7 +194,7 @@ export default function AnalysisView() {
       {reportErr && <div className="err-banner" style={{ marginBottom: 16 }}>{reportErr}</div>}
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 24, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 24, overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 2 }}>
         {TABS.map(({ k, label, icon }) => (
           <button key={k} className={`nav-tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>
             <i className={`ti ${icon}`} style={{ fontSize: 15 }}></i> {label}
@@ -277,7 +277,7 @@ export default function AnalysisView() {
         {/* ── Scorecard Saúde Financeira ── */}
         <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginBottom: 24 }}>
           <h2 style={{ fontSize: 20, marginBottom: 16 }}>Saúde Financeira</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+          <div className="grid-5">
             {SCORECARD.map(({ key, label, icon }) => {
               const r = scoreGrade(key, indicators);
               const c = GC[r?.[0]] || GC[''];
@@ -302,7 +302,7 @@ export default function AnalysisView() {
           ) : (
             <p style={{ fontFamily: 'var(--font-serif)', fontSize: 18, lineHeight: 1.7, color: 'var(--t3)', fontStyle: 'italic', marginBottom: 20 }}>Gere o relatório com IA para visualizar o sumário executivo.</p>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          <div className="grid-3">
             {[
               { label: 'Liquidez Corrente', val: num(lcVal), color: lcColor },
               { label: 'Endividamento Total', val: pct(etVal), color: etColor },
@@ -326,7 +326,9 @@ export default function AnalysisView() {
 
         {/* ── 2. Análise por Pilares ── */}
         <div style={{ marginBottom: 24 }}>
-          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 22, color: 'var(--t0)', marginBottom: 16 }}>Análise por pilares</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Análise por Pilares</span>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {PILARES.map(pilar => {
               const pm = PILAR_META[pilar.key];
@@ -345,8 +347,7 @@ export default function AnalysisView() {
                       const meta = INDICATOR_META[k];
                       const descText = (meta && raw != null) ? meta.desc(raw) : '';
                       return (
-                        <div key={k} style={{
-                          display: 'grid', gridTemplateColumns: '1.2fr 0.6fr 0.6fr 2fr', alignItems: 'center', gap: 12,
+                        <div key={k} className="grid-4col-indicator" style={{
                           padding: '12px 0',
                           borderBottom: idx < pilar.items.length - 1 ? '1px solid var(--bd)' : 'none'
                         }}>
@@ -374,10 +375,12 @@ export default function AnalysisView() {
         </div>
 
         {/* ── 3. SWOT ── */}
-        {narrative && (narrative.forcas || narrative.fraquezas || narrative.riscos) && (
+        {narrative && (
           <div style={{ marginBottom: 24 }}>
-            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 22, color: 'var(--t0)', marginBottom: 16 }}>Diagnóstico SWOT financeiro</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Diagnóstico SWOT Financeiro</span>
+            </div>
+            <div className="grid-2" style={{ gap: 12 }}>
               {[
                 { label: 'Forças', text: narrative.forcas, bg: 'rgba(20,135,78,.06)', bd: 'rgba(20,135,78,.25)', icon: 'ti-trending-up', color: 'var(--green-t)' },
                 { label: 'Oportunidades', text: null, bg: 'rgba(196,164,52,.06)', bd: 'rgba(196,164,52,.25)', icon: 'ti-sparkles', color: 'var(--gold)' },
@@ -410,11 +413,14 @@ export default function AnalysisView() {
         )}
 
         {/* ── 4. Recomendações ── */}
-        {narrative?.recomendacoes && narrative.recomendacoes.length > 0 && (
+        {narrative && (
           <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 28, marginBottom: 24 }}>
-            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 22, color: 'var(--t0)', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <i className="ti ti-sparkles" style={{ color: 'var(--gold)' }}></i> Recomendações estratégicas
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Recomendações Estratégicas</span>
+            </div>
+            {(!narrative.recomendacoes || narrative.recomendacoes.length === 0) ? (
+              <p style={{ fontFamily: 'var(--font-serif)', fontSize: 18, lineHeight: 1.7, color: 'var(--t3)', fontStyle: 'italic', margin: 0 }}>Gere o relatório com IA para visualizar as recomendações estratégicas.</p>
+            ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
               {narrative.recomendacoes.map((rec, i) => {
                 const colonIdx = rec.indexOf(':');
@@ -439,6 +445,7 @@ export default function AnalysisView() {
                 );
               })}
             </div>
+            )}
           </div>
         )}
 
@@ -480,10 +487,17 @@ export default function AnalysisView() {
             </div>
 
             {REPORT_SECTIONS.map(({ key, title, heading, divider }) => {
-              if (key.startsWith('_h_')) {
+              if (key.startsWith('_h_') || heading) {
                 return (
                   <div key={key} style={{ marginTop: divider ? 32 : 0, marginBottom: 16 }}>
                     <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>{title}</h3>
+                    {heading && !key.startsWith('_h_') && (
+                      <div style={{ marginTop: 8 }}>
+                        {editMode
+                          ? <AutoTextarea value={narrative[key] || ''} onChange={e => updateNarrative(key, e.target.value)} placeholder="Digite o texto desta seção..." />
+                          : <p style={{ fontSize: 14, lineHeight: 1.75, color: 'var(--t1)', margin: 0 }}>{narrative[key] || <em style={{ color: 'var(--t3)' }}>Sem conteúdo.</em>}</p>}
+                      </div>
+                    )}
                   </div>
                 );
               }
@@ -500,7 +514,7 @@ export default function AnalysisView() {
             })}
 
             <div style={{ marginTop: 32, marginBottom: 20 }}>
-              <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)', marginBottom: 16 }}>Recomendações Estratégicas</h3>
+              <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)', marginBottom: 16 }}>4. Recomendações Estratégicas</h3>
               {editMode
                 ? <AutoTextarea value={(narrative.recomendacoes || []).join('\n')} onChange={e => updateNarrative('recomendacoes', e.target.value.split('\n').filter(l => l.trim()))} placeholder="Uma recomendação por linha..." />
                 : <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -517,7 +531,7 @@ export default function AnalysisView() {
 
       {/* ═══ TAB: INDICADORES ═══ */}
       {tab === 'indicadores' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="grid-2">
           {PILARES.map(pilar => {
             const data = indicators?.[pilar.key] || {};
             return (
@@ -525,7 +539,7 @@ export default function AnalysisView() {
                 <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--bd)' }}>
                   <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>{pilar.label}</div>
                 </div>
-                <table className="fin-table">
+                <div className="table-scroll"><table className="fin-table">
                   <thead><tr><th>Indicador</th><th className="r">Valor</th><th className="r">Status</th></tr></thead>
                   <tbody>
                     {pilar.items.map(({ k, label, fn }) => {
@@ -542,7 +556,7 @@ export default function AnalysisView() {
                       );
                     })}
                   </tbody>
-                </table>
+                </table></div>
               </div>
             );
           })}
@@ -551,12 +565,12 @@ export default function AnalysisView() {
 
       {/* ═══ TAB: BALANÇO PATRIMONIAL ═══ */}
       {tab === 'bp' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="grid-2">
           <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
             <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--bd)' }}>
               <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>Ativo</div>
             </div>
-            <table className="fin-table">
+            <div className="table-scroll"><table className="fin-table">
               <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
               <tbody>
                 <tr className="ft-group"><td>Ativo Circulante</td><td className="r">{fmtT(bp.ativo_circulante)}</td><td className="pct">{avPct(bp.ativo_circulante, totalAtivo)}</td></tr>
@@ -567,13 +581,13 @@ export default function AnalysisView() {
                 {bp.ativo_permanente != null && <tr className="ft-sub"><td>Ativo Permanente</td><td className="r">{fmtT(bp.ativo_permanente)}</td><td className="pct">{avPct(bp.ativo_permanente, totalAtivo)}</td></tr>}
                 <tr className="ft-total"><td>TOTAL DO ATIVO</td><td className="r">{fmtT(bp.total_ativo)}</td><td className="pct">100,0%</td></tr>
               </tbody>
-            </table>
+            </table></div>
           </div>
           <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
             <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--bd)' }}>
               <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>Passivo + Patrimônio Líquido</div>
             </div>
-            <table className="fin-table">
+            <div className="table-scroll"><table className="fin-table">
               <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
               <tbody>
                 <tr className="ft-group"><td>Passivo Circulante</td><td className="r">{fmtT(bp.passivo_circulante)}</td><td className="pct">{avPct(bp.passivo_circulante, totalAtivo)}</td></tr>
@@ -581,7 +595,7 @@ export default function AnalysisView() {
                 <tr className="ft-group"><td>Patrimônio Líquido</td><td className="r">{fmtT(bp.patrimonio_liquido)}</td><td className="pct">{avPct(bp.patrimonio_liquido, totalAtivo)}</td></tr>
                 <tr className="ft-total"><td>TOTAL PASSIVO + PL</td><td className="r">{fmtT(bp.total_passivo_pl)}</td><td className="pct">100,0%</td></tr>
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       )}
@@ -592,7 +606,7 @@ export default function AnalysisView() {
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--bd)' }}>
             <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)' }}>Demonstração de Sobras e Perdas</div>
           </div>
-          <table className="fin-table">
+          <div className="table-scroll"><table className="fin-table">
             <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
             <tbody>
               <tr className="ft-group"><td>{dsp.ingressos != null ? 'Ingressos / Receita Bruta' : 'Receita Bruta'}</td><td className="r">{fmtT(dsp.ingressos ?? dsp.receita_bruta)}</td><td className="pct">{avPct(dsp.ingressos ?? dsp.receita_bruta, receitaRef)}</td></tr>
@@ -604,7 +618,7 @@ export default function AnalysisView() {
               {dsp.resultado_antes_ir != null && <tr className="ft-subtotal"><td>Resultado Antes do IR</td><td className="r">{fmtT(dsp.resultado_antes_ir)}</td><td className="pct">{avPct(dsp.resultado_antes_ir, receitaRef)}</td></tr>}
               <tr className="ft-result"><td>SOBRAS / PERDAS</td><td className="r" style={(sobras ?? 0) < 0 ? { color: 'var(--red-t)' } : {}}>{fmtT(sobras)}</td><td className="pct">{avPct(sobras, receitaRef)}</td></tr>
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 

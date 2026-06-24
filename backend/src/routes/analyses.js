@@ -16,8 +16,11 @@ router.get('/', async (req, res, next) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
     let sql = `
       SELECT a.id, a.year, a.status, a.confidence, a.created_at,
-        c.id AS client_id, c.name AS client_name
-      FROM analyses a JOIN clients c ON c.id = a.client_id
+        c.id AS client_id, c.name AS client_name,
+        u.name AS user_name, u.avatar AS user_avatar, u.avatar_color AS user_avatar_color
+      FROM analyses a
+      JOIN clients c ON c.id = a.client_id
+      LEFT JOIN users u ON u.id = a.created_by
       WHERE c.tenant_id = ?
     `;
     const params = [req.user.tenant_id];

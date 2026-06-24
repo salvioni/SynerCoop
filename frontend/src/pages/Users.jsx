@@ -58,7 +58,7 @@ export default function Users() {
 
   return (
     <>
-      <div className="page-body" style={{ padding: '40px 32px' }}>
+      <div className="page-body">
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 32 }}>
           <div>
             <div style={{ fontSize: 14, color: 'var(--t2)' }}>Membros do escritório</div>

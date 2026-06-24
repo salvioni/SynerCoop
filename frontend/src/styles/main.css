@@ -134,7 +134,7 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .page-head { padding: 28px 32px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-shrink: 0; background: var(--bg0) }
 .page-head-l p { font-size: 14px; color: var(--t2); margin-bottom: 2px }
 .page-head-l h1 { font-family: var(--font-serif); font-size: 36px; font-weight: 400; color: var(--t0); letter-spacing: -0.01em; line-height: 1.15 }
-.page-body { flex: 1; overflow-y: auto; padding: 0 32px 32px }
+.page-body { flex: 1; overflow-y: auto; padding: 32px 32px 40px }
 
 /* ── Nav Tabs (inside page) ── */
 .nav-tabs { display: flex; gap: 4px; padding: 10px 18px; background: var(--bg1); border-bottom: 1px solid var(--bd); flex-shrink: 0 }
@@ -160,6 +160,7 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .inp { width: 100%; background: var(--bg1); border: 1px solid var(--bd); border-radius: 6px; color: var(--t0); padding: 10px 12px; outline: none; transition: border .12s; font-size: 14px }
 select.inp { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238A929D' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 32px; cursor: pointer }
 .inp:focus { border-color: var(--blue) }
+.inp:disabled { opacity: 0.6; cursor: default }
 .inp::placeholder { color: var(--t3) }
 .inp-err { border-color: var(--red) !important }
 .inp-wrap { margin-bottom: 13px }
@@ -406,6 +407,13 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .cfm-icon-d { background: var(--red-dim); color: var(--red-t) }
 .cfm-icon-i { background: var(--blue-dim); color: var(--blue-text) }
 
+/* ── Responsive grid helpers ── */
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px }
+.grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px }
+.grid-4col-indicator { display: grid; grid-template-columns: 1.2fr 0.6fr 0.6fr 2fr; align-items: center; gap: 12px }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch }
+
 /* ── Misc ── */
 .hover-underline:hover { text-decoration: underline }
 .err-banner { background: var(--red-dim); border: 1px solid rgba(220,38,38,.2); border-radius: var(--r); padding: 9px 12px; font-size: 13px; color: var(--red-t); margin-bottom: 10px }
@@ -538,6 +546,19 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 /* ── Bottom nav (mobile/tablet) ── */
 .bottom-nav { display: none }
 
+/* ── Tablet breakpoint ── */
+@media (max-width: 1024px) {
+  .dash-grid { grid-template-columns: repeat(2, 1fr) }
+  .cl-grid { grid-template-columns: repeat(2, 1fr) }
+  .sc-grid { grid-template-columns: repeat(3, 1fr) }
+  .grid-5 { grid-template-columns: repeat(3, 1fr) }
+  .grid-3 { grid-template-columns: repeat(2, 1fr) }
+  .grid-4col-indicator { grid-template-columns: 1fr; gap: 6px }
+  .grid-4col-indicator > :nth-child(2) { font-size: 22px !important }
+  .ld-plans { grid-template-columns: 1fr 1fr 1fr }
+}
+
+/* ── Mobile breakpoint ── */
 @media (max-width: 768px) {
   .auth-split { grid-template-columns: 1fr }
   .auth-panel { display: none }
@@ -578,8 +599,19 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
   .nav-tabs { padding: 8px 16px }
   .tab-body { padding: 14px 16px }
   .overlay .modal { max-width: calc(100vw - 32px) }
+  .grid-2 { grid-template-columns: 1fr }
+  .grid-3 { grid-template-columns: 1fr }
+  .grid-5 { grid-template-columns: repeat(2, 1fr) }
+  .sc-grid { grid-template-columns: repeat(2, 1fr) }
+  .cl-search { max-width: 100% !important; min-width: 0 }
+  .fin-table th { padding: 8px 10px; font-size: 11px }
+  .fin-table td { padding: 6px 10px; font-size: 12px }
+  .fin-table td.r { font-size: 12px }
+  .pilar-body { grid-template-columns: repeat(2, 1fr) }
+  .pilar-body .ind-cell:nth-child(2n) { border-right: none }
 }
 
+/* ── Small phone breakpoint ── */
 @media (max-width: 480px) {
   .page-head { flex-direction: column; align-items: flex-start; gap: 12px }
   .page-head-l h1 { font-size: 24px }
@@ -587,4 +619,7 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
   .dash-card-val { font-size: 28px }
   .rv-grid { grid-template-columns: 1fr }
   .sum-row { grid-template-columns: 1fr }
+  .grid-5 { grid-template-columns: 1fr }
+  .sc-grid { grid-template-columns: 1fr }
+  .grid-4col-indicator > :nth-child(2) { font-size: 18px !important }
 }

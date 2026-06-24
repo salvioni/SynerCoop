@@ -8,6 +8,7 @@ import { audit, ACTIONS } from '../lib/audit.js';
 import { extractFromFile } from '../lib/extractor.js';
 import { calculateIndicators } from '../lib/calculator.js';
 import { generateText } from '../lib/llm.js';
+import { PLAN_LIMITS } from '../lib/plans.js';
 
 const ALLOWED_MIMES = new Set([
   'application/pdf',
@@ -170,6 +171,19 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
       .get(req.params.id, req.user.tenant_id);
     if (!client) throw badRequest('Cliente não encontrado.');
 
+    const tenant = await db.prepare('SELECT plan FROM tenants WHERE id = ?').get(req.user.tenant_id);
+    const limit = PLAN_LIMITS[tenant?.plan] ?? PLAN_LIMITS.trial;
+    if (limit !== Infinity) {
+      const monthly = await db.prepare(`
+        SELECT COUNT(*) AS cnt FROM analyses a
+        JOIN clients c ON c.id = a.client_id
+        WHERE c.tenant_id = ? AND a.created_at >= date('now', 'start of month')
+      `).get(req.user.tenant_id);
+      if ((monthly?.cnt || 0) >= limit) {
+        throw badRequest(`Limite de ${limit} análises/mês atingido no plano ${(tenant?.plan || 'trial').toUpperCase()}. Faça upgrade para continuar.`);
+      }
+    }
+
     let bpData, dspData, year, confidence, notes;
 
     if (req.file) {
@@ -247,9 +261,9 @@ Regras:
     }
 
     await db.prepare(`
-      INSERT INTO analyses (id, client_id, year, bp, dsp, indicators, confidence, notes, narrative, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'done')
-    `).run(id, client.id, year, JSON.stringify(bpData), JSON.stringify(dspData), JSON.stringify(indicators), confidence, notes, narrative ? JSON.stringify(narrative) : null);
+      INSERT INTO analyses (id, client_id, year, bp, dsp, indicators, confidence, notes, narrative, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'done', ?)
+    `).run(id, client.id, year, JSON.stringify(bpData), JSON.stringify(dspData), JSON.stringify(indicators), confidence, notes, narrative ? JSON.stringify(narrative) : null, req.user.id);
 
     const analysis = await db.prepare('SELECT * FROM analyses WHERE id = ?').get(id);
     await audit(req, ACTIONS.ANALYSIS_CREATED, { targetType: 'analysis', targetId: id, targetLabel: `${client.name} ${year}` });

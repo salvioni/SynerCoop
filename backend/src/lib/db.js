@@ -234,6 +234,9 @@ export async function initDb() {
     `ALTER TABLE clients ADD COLUMN contact_phone TEXT`,
     `ALTER TABLE clients ADD COLUMN notes TEXT`,
     `ALTER TABLE analyses ADD COLUMN narrative TEXT`,
+    `ALTER TABLE analyses ADD COLUMN created_by TEXT`,
+    `ALTER TABLE users ADD COLUMN avatar TEXT`,
+    `ALTER TABLE users ADD COLUMN avatar_color TEXT`,
   ]) {
     try { await db.exec(sql); } catch { /* já aplicado ou não suportado pelo driver */ }
   }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import FilterSelect from '../components/FilterSelect.jsx';
+import UserAvatar from '../components/UserAvatar.jsx';
 
 export default function AnalysesList() {
   const navigate = useNavigate();
@@ -27,14 +28,14 @@ export default function AnalysesList() {
   );
 
   return (
-    <div className="page-body" style={{ padding: '40px 32px' }}>
+    <div className="page-body">
       <div style={{ marginBottom: 0 }}>
         <div style={{ fontSize: 14, color: 'var(--t2)' }}>Histórico</div>
         <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 4, color: 'var(--t0)' }}>Análises</h1>
       </div>
 
       <div style={{ marginTop: 32, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div className="cl-search" style={{ flex: 1, maxWidth: 420 }}>
+        <div className="cl-search" style={{ flex: 1, minWidth: 200 }}>
           <i className="ti ti-search"></i>
           <input className="inp" placeholder="Buscar por cliente, CNPJ..."
             value={search} onChange={e => setSearch(e.target.value)} />
@@ -67,8 +68,8 @@ export default function AnalysesList() {
         {loading ? (
           <div style={{ color: 'var(--t2)', fontSize: 14, padding: '40px 0', textAlign: 'center' }}>Carregando…</div>
         ) : (
-          <div className="adm-table-wrap">
-            <table className="adm-table">
+          <div className="adm-table-wrap table-scroll">
+            <table className="adm-table" style={{ minWidth: 600 }}>
               <thead>
                 <tr>
                   <th>Cliente</th>
@@ -83,7 +84,14 @@ export default function AnalysesList() {
                   <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/app/analyses/${a.id}`)}>
                     <td>{a.client_name || 'Cliente'}</td>
                     <td>{a.year}</td>
-                    <td>{a.user_name || '—'}</td>
+                    <td>
+                      {a.user_name ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <UserAvatar user={{ name: a.user_name, avatar: a.user_avatar, avatar_color: a.user_avatar_color }} size={24} />
+                          {a.user_name}
+                        </div>
+                      ) : '—'}
+                    </td>
                     <td>{new Date(a.created_at).toLocaleDateString('pt-BR')}</td>
                     <td><span className="pill pill-g">Concluída</span></td>
                   </tr>

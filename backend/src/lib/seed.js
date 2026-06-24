@@ -15,7 +15,7 @@ export async function seedDb() {
 
   // Tenant demo
   const tenantId = 'demo-tenant';
-  await db.prepare('INSERT INTO tenants (id, name, plan) VALUES (?, ?, ?)').run(tenantId, 'Escritório Demo Contábil', 'trial');
+  await db.prepare('INSERT INTO tenants (id, name, plan) VALUES (?, ?, ?)').run(tenantId, 'Escritório Demo Contábil', 'pro');
 
   // Usuário gerente demo
   const mgrId = nanoid(10);

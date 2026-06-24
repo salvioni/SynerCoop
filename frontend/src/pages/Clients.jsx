@@ -67,7 +67,7 @@ export default function Clients() {
 
   return (
     <>
-      <div className="page-body" style={{ padding: '40px 32px' }}>
+      <div className="page-body">
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 32 }}>
           <div>
             <div style={{ fontSize: 14, color: 'var(--t2)' }}>Empresas analisadas</div>
@@ -78,7 +78,7 @@ export default function Clients() {
           </button>
         </div>
 
-        <div className="cl-search" style={{ marginBottom: 24 }}>
+        <div className="cl-search" style={{ marginBottom: 24, maxWidth: 480, width: '100%' }}>
           <i className="ti ti-search"></i>
           <input className="inp" placeholder="Buscar cliente ou CNPJ..."
             value={search} onChange={e => setSearch(e.target.value)} />

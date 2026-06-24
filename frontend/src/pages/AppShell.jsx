@@ -1,5 +1,9 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth.jsx';
+import { api } from '../lib/api.js';
+import { getPlan } from '../lib/plans.js';
+import UserAvatar from '../components/UserAvatar.jsx';
 
 function initials(name) {
   return name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -8,7 +12,12 @@ function initials(name) {
 export default function AppShell() {
   const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
+  const [accountInfo, setAccountInfo] = useState(null);
+  useEffect(() => { api.get('/account').then(setAccountInfo).catch(() => {}); }, []);
   if (!user) return null;
+  const plan = getPlan(accountInfo?.plan || user.plan);
+  const monthly = accountInfo?.monthlyAnalyses ?? 0;
+  const pctUsed = plan.limit === Infinity ? 0 : Math.min(100, Math.round((monthly / plan.limit) * 100));
   function doLogout() { logout(); navigate('/login', { replace: true }); }
 
   return (
@@ -25,7 +34,7 @@ export default function AppShell() {
         <div className="s-office">
           <div className="s-office-label">Escritório</div>
           <div className="s-office-name">{user.tenant_name || 'Meu Escritório'}</div>
-          <div className="s-office-plan">Plano Pro</div>
+          <div className="s-office-plan">Plano {plan.label}</div>
         </div>
 
         <button className="s-cta" onClick={() => navigate('/app/analyses/new')}>
@@ -39,7 +48,7 @@ export default function AppShell() {
           <NavLink to="/app/clients" className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
             <i className="ti ti-building" aria-hidden="true"></i> Clientes
           </NavLink>
-          <NavLink to="/app/analyses" className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
+          <NavLink to="/app/analyses" end className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
             <i className="ti ti-chart-bar" aria-hidden="true"></i> Análises
           </NavLink>
           <NavLink to="/app/settings" className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
@@ -56,18 +65,20 @@ export default function AppShell() {
           <div className="s-card-analyses">
             <div className="s-meter-row">
               <span>Análises este mês</span>
-              <span>18/100</span>
+              <span>{monthly}/{plan.limit === Infinity ? '∞' : plan.limit}</span>
             </div>
             <div className="s-meter-bar">
-              <div className="s-meter-fill" style={{ width: '18%' }}></div>
+              <div className="s-meter-fill" style={{ width: `${pctUsed}%` }}></div>
             </div>
-            <div className="s-upgrade">
-              <i className="ti ti-sparkles"></i> Upgrade para Enterprise
-            </div>
+            {plan.limit !== Infinity && (
+              <div className="s-upgrade">
+                <i className="ti ti-sparkles"></i> Upgrade para Enterprise
+              </div>
+            )}
           </div>
 
           <div className="s-user">
-            <div className="s-av">{initials(user.name)}</div>
+            <UserAvatar user={user} size={36} />
             <div className="s-uname">
               <div className="s-uname-name">{user.name}</div>
               <div className="s-uname-email">{user.email}</div>
