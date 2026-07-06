@@ -21,7 +21,7 @@ export async function authRequired(req, _res, next) {
     if (!payload) return next(unauthorized('Token inválido ou expirado.'));
     const user = await db.prepare(`
       SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.email_verified, u.avatar, u.avatar_color,
-             t.name AS tenant_name, t.plan, t.active AS tenant_active, t.type AS tenant_type, t.self_client_id
+             t.name AS tenant_name, t.plan, t.active AS tenant_active, t.type AS tenant_type, t.self_client_id, t.logo AS tenant_logo
       FROM users u
       LEFT JOIN tenants t ON t.id = u.tenant_id
       WHERE u.id = ?

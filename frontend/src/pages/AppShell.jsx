@@ -1,15 +1,13 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth.jsx';
-import { api } from '../lib/api.js';
+import { useAccountInfo } from '../lib/accountInfo.jsx';
 import { getPlan } from '../lib/plans.js';
 import UserAvatar from '../components/UserAvatar.jsx';
 
 export default function AppShell() {
   const { user, logout, isAdmin, isSingleEntity } = useAuth();
   const navigate = useNavigate();
-  const [accountInfo, setAccountInfo] = useState(null);
-  useEffect(() => { api.get('/account').then(setAccountInfo).catch(() => {}); }, []);
+  const { accountInfo } = useAccountInfo();
   if (!user) return null;
   const plan = getPlan(accountInfo?.plan || user.plan);
   const monthly = accountInfo?.monthlyAnalyses ?? 0;

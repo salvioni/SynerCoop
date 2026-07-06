@@ -13,7 +13,7 @@ const router = Router();
 
 router.get('/', planExempt, authRequired, async (req, res, next) => {
   try {
-    const tenant = await db.prepare('SELECT name, plan FROM tenants WHERE id = ?').get(req.user.tenant_id);
+    const tenant = await db.prepare('SELECT name, plan, logo FROM tenants WHERE id = ?').get(req.user.tenant_id);
     const clientCount = await db.prepare('SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ? AND active = 1').get(req.user.tenant_id);
     const analysisCount = await db.prepare(`
       SELECT COUNT(*) AS cnt FROM analyses a
@@ -27,6 +27,7 @@ router.get('/', planExempt, authRequired, async (req, res, next) => {
     `).get(req.user.tenant_id, startOfMonthISO());
     res.json({
       companyName: tenant?.name || '',
+      logo: tenant?.logo || null,
       // null (não 'trial') enquanto o tenant ainda não escolheu um plano —
       // esta rota é acessível antes da escolha (ver PLAN_EXEMPT_ROUTES em
       // middleware/auth.js), então mentir aqui esconderia esse estado.
@@ -92,6 +93,30 @@ router.patch('/avatar-color', authRequired, async (req, res, next) => {
 router.delete('/avatar', authRequired, async (req, res, next) => {
   try {
     await db.prepare('UPDATE users SET avatar = NULL WHERE id = ?').run(req.user.id);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Logo do escritório/empresa — usado na marca branca dos relatórios DOCX
+// gerados (ver lib/report.js). Fica em tenants, não em users: é o mesmo
+// logo pra todo mundo do escritório, independente de quem gerou o relatório.
+// Restrito aos formatos que a biblioteca `docx` sabe embutir num .docx —
+// diferente do avatar de usuário (decorativo, só CSS), esse logo precisa
+// renderizar de verdade dentro do relatório baixável.
+const LOGO_ALLOWED_MIMES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
+router.post('/logo', authRequired, upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) throw badRequest('Nenhuma imagem enviada.');
+    if (!LOGO_ALLOWED_MIMES.includes(req.file.mimetype)) throw badRequest('Formato não suportado. Use PNG, JPG, GIF ou BMP.');
+    const base64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    await db.prepare('UPDATE tenants SET logo = ? WHERE id = ?').run(base64, req.user.tenant_id);
+    res.json({ logo: base64 });
+  } catch (e) { next(e); }
+});
+
+router.delete('/logo', authRequired, async (req, res, next) => {
+  try {
+    await db.prepare('UPDATE tenants SET logo = NULL WHERE id = ?').run(req.user.tenant_id);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

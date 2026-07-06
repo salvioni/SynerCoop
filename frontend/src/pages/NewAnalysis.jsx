@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, uploadFile, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useAccountInfo } from '../lib/accountInfo.jsx';
+import { useBackNavigate } from '../lib/useBackNavigate.js';
+import ClientFormModal from '../components/ClientFormModal.jsx';
 
 const STEPS = [
   { n: 1, label: 'Cliente' },
@@ -13,6 +16,8 @@ const STEPS_SINGLE_ENTITY = STEPS.filter(s => s.n !== 1);
 export default function NewAnalysis() {
   const navigate = useNavigate();
   const { user, isSingleEntity } = useAuth();
+  const { refetch: refetchAccountInfo } = useAccountInfo();
+  const goBack = useBackNavigate('/app/dashboard');
   const [step, setStep] = useState(isSingleEntity ? 2 : 1);
 
   const [clients, setClients] = useState([]);
@@ -24,7 +29,12 @@ export default function NewAnalysis() {
   const [drag, setDrag] = useState(false);
   const [err, setErr] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [clientModal, setClientModal] = useState(false);
+  const [hintArrow, setHintArrow] = useState(null);
   const fileRef = useRef(null);
+  const step1WrapRef = useRef(null);
+  const addClientBtnRef = useRef(null);
+  const emptyTextRef = useRef(null);
 
   useEffect(() => {
     const req = isSingleEntity
@@ -38,6 +48,54 @@ export default function NewAnalysis() {
   );
 
   const selectedClient = clients.find(c => c.id === clientId);
+
+  const showEmptyHint = step === 1 && !loadingClients && !search && !filtered.length;
+
+  useEffect(() => {
+    if (!showEmptyHint) { setHintArrow(null); return; }
+    const wrap = step1WrapRef.current;
+    if (!wrap) return;
+
+    function measure() {
+      const btn = addClientBtnRef.current;
+      const text = emptyTextRef.current;
+      if (!btn || !text) return;
+      const wrapRect = wrap.getBoundingClientRect();
+      const btnRect = btn.getBoundingClientRect();
+      const textRect = text.getBoundingClientRect();
+
+      const x1 = textRect.right - wrapRect.left + 24;
+      const y1 = textRect.top + textRect.height / 2 - wrapRect.top;
+      const x2 = btnRect.left + btnRect.width / 2 - wrapRect.left;
+      const y2 = btnRect.bottom - wrapRect.top + 16;
+      const dx = x2 - x1;
+      const rise = Math.max(y1 - y2, 1);
+      // formato de "gancho": começo bem reto/quase horizontal saindo do
+      // texto, e só sobe forte perto do botão.
+      const c1x = x1 + dx * 0.45;
+      const c1y = y1 + rise * 0.05;
+      const c2x = x1 + dx * 0.9;
+      const c2y = y1 - rise * 0.15;
+
+      setHintArrow({ d: `M${x1},${y1} C${c1x},${c1y} ${c2x},${c2y} ${x2},${y2}` });
+    }
+
+    measure();
+    // ResizeObserver cobre qualquer mudança de layout dentro do wrap (não só
+    // resize da janela) — ex.: sidebar recolhendo, fonte carregando — com o
+    // throttling de frame já embutido no browser, sem precisar de debounce manual.
+    const observer = new ResizeObserver(measure);
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [showEmptyHint]);
+
+  function onClientCreated(client) {
+    setClients(p => [...p, client]);
+    setClientId(client.id);
+    setClientModal(false);
+    setSearch('');
+    setStep(2);
+  }
 
   function selectFile(f) {
     if (!f) return;
@@ -66,6 +124,7 @@ export default function NewAnalysis() {
         bp: bpClean, dsp: dspClean, year: ex.year || new Date().getFullYear(),
         confidence: ex.confidence, notes: ex.notes,
       });
+      refetchAccountInfo();
       navigate(`/app/analyses/${saved.analysis.id}`, { replace: true });
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'Erro ao processar. Tente novamente.');
@@ -76,7 +135,7 @@ export default function NewAnalysis() {
 
   return (
     <div className="page-body" style={{ maxWidth: 680, margin: '0 auto', width: '100%' }}>
-      <button className="back" onClick={() => navigate(-1)} style={{ marginBottom: 16 }}>
+      <button className="back" onClick={goBack} style={{ marginBottom: 16 }}>
         <i className="ti ti-arrow-left"></i> Voltar
       </button>
 
@@ -114,18 +173,35 @@ export default function NewAnalysis() {
 
       {/* Step 1: Select client */}
       {step === 1 && (
-        <div>
-          <div className="cl-search" style={{ marginBottom: 16 }}>
-            <i className="ti ti-search"></i>
-            <input className="inp" placeholder="Buscar cliente ou CNPJ..."
-              value={search} onChange={e => setSearch(e.target.value)} />
+        <div ref={step1WrapRef} style={{ position: 'relative' }}>
+          {hintArrow && (
+            <svg width="100%" height="100%"
+              style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+              <defs>
+                <marker id="hint-arrowhead" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+                  <path d="M0,0 L6,3 L0,6 Z" fill="var(--t3)" />
+                </marker>
+              </defs>
+              <path d={hintArrow.d} fill="none" stroke="var(--t3)" strokeWidth="1.5" strokeDasharray="4 3" markerEnd="url(#hint-arrowhead)" />
+            </svg>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <div className="cl-search" style={{ flex: 1 }}>
+              <i className="ti ti-search"></i>
+              <input className="inp" placeholder="Buscar cliente ou CNPJ..."
+                value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <button ref={addClientBtnRef} className="btn" onClick={() => setClientModal(true)}>
+              <i className="ti ti-plus"></i> Adicionar cliente
+            </button>
           </div>
 
           {loadingClients ? (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>Carregando...</div>
           ) : !filtered.length ? (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>
-              {search ? 'Nenhum cliente encontrado.' : 'Nenhum cliente cadastrado.'}
+              <span ref={emptyTextRef}>{search ? 'Nenhum cliente encontrado.' : 'Nenhum cliente ativo.'}</span>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -218,6 +294,10 @@ export default function NewAnalysis() {
             Extraindo dados e calculando indicadores de <strong>{selectedClient?.name}</strong>
           </p>
         </div>
+      )}
+
+      {clientModal && (
+        <ClientFormModal client={null} onClose={() => setClientModal(false)} onSaved={onClientCreated} />
       )}
     </div>
   );

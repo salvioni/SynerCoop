@@ -1,11 +1,51 @@
 // Port do report_generator.py — usa pacote docx (npm) para gerar .docx.
 
 import {
-  Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType,
+  Document, Packer, Paragraph, TextRun, AlignmentType,
   Table, TableRow, TableCell, WidthType, ShadingType, BorderStyle,
-  convertInchesToTwip
+  convertInchesToTwip, ImageRun, Footer, PageNumber
 } from 'docx';
+import { imageSize } from 'image-size';
 import { generateText, parseJsonFromLLM } from './llm.js';
+
+const LOGO_MIME_TO_DOCX_TYPE = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/bmp': 'bmp' };
+const LOGO_MAX_WIDTH = 160;
+const LOGO_MAX_HEIGHT = 90;
+
+// SQLite CURRENT_TIMESTAMP grava 'YYYY-MM-DD HH:MM:SS' em UTC, sem indicação
+// de fuso — sem o 'Z', new Date(...) interpretaria como horário local e
+// mostraria uma hora errada pro assinante.
+function formatSignedAt(raw) {
+  if (!raw) return '';
+  const d = new Date(raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`);
+  if (isNaN(d.getTime())) return '';
+  return `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+// Decodifica o data URL (data:<mime>;base64,<...>) salvo em tenants.logo e
+// monta um ImageRun já escalado (mantendo proporção) pra caber na capa do
+// relatório. Qualquer falha aqui (formato inesperado, base64 corrompido)
+// apenas omite o logo — nunca deve travar a geração do relatório.
+function buildLogoImage(logoDataUrl) {
+  const match = /^data:([^;]+);base64,(.+)$/s.exec(logoDataUrl || '');
+  if (!match) return null;
+  const docxType = LOGO_MIME_TO_DOCX_TYPE[match[1]];
+  if (!docxType) return null;
+
+  let buffer, dims;
+  try {
+    buffer = Buffer.from(match[2], 'base64');
+    dims = imageSize(buffer);
+  } catch { return null; }
+  if (!dims?.width || !dims?.height) return null;
+
+  const scale = Math.min(LOGO_MAX_WIDTH / dims.width, LOGO_MAX_HEIGHT / dims.height, 1);
+  return new ImageRun({
+    type: docxType,
+    data: buffer,
+    transformation: { width: Math.round(dims.width * scale), height: Math.round(dims.height * scale) },
+  });
+}
 
 const REPORT_PROMPT = `Você é um analista financeiro especializado em cooperativas brasileiras.
 
@@ -68,7 +108,6 @@ const NAVY = '0D1E3B';
 const GRAY = '5C646F';
 const BODY_COLOR = '2A3442';
 const MUTED = '8A929D';
-const GOLD = 'C6A050';
 const GREEN_BG = 'E8F5E9';
 const GREEN_T = '14874E';
 const YELLOW_BG = 'FFF8E1';
@@ -77,15 +116,6 @@ const RED_BG = 'FFEBEE';
 const RED_T = 'D01D21';
 const BLUE_LABEL = '0D1E3B';
 const BORDER = 'DADEE5';
-const BG_MUTED = 'F1F0F5';
-
-function sectionLabel(text) {
-  return new Paragraph({
-    children: [new TextRun({ text: text.toUpperCase(), size: 18, color: BLUE_LABEL, bold: true })],
-    spacing: { before: 300, after: 100 },
-    border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: BORDER, space: 6 } },
-  });
-}
 
 function mainHeading(text) {
   return new Paragraph({
@@ -124,11 +154,15 @@ function makeSwotCell(label, text, bgHex, colorHex) {
   });
 }
 
-async function buildDocx(companyName, companyType, year, narrative) {
+async function buildDocx(companyName, companyType, year, narrative, logo, signature) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('pt-BR');
+  const logoImage = buildLogoImage(logo);
 
   const children = [
+    // Logo do escritório (marca branca), se configurado em Ajustes
+    ...(logoImage ? [new Paragraph({ alignment: AlignmentType.CENTER, children: [logoImage], spacing: { after: 200 } })] : []),
+
     // Título
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -193,27 +227,50 @@ async function buildDocx(companyName, companyType, year, narrative) {
     // 4. Recomendações
     mainHeading('4. Recomendações Estratégicas'),
     ...(narrative.recomendacoes || []).map((rec, i) => {
-      const colonIdx = rec.indexOf(':');
-      const title = colonIdx > 0 ? rec.substring(0, colonIdx).replace(/^Recomendação\s*\d*\s*/i, '').trim() : '';
-      const desc = colonIdx > 0 ? rec.substring(colonIdx + 1).trim() : rec;
+      // O prompt pede "Recomendação N com título curto: descrição", mas na
+      // prática a IA quase sempre devolve só "Recomendação N: descrição"
+      // (um único ':'), sem um título curto separado — extrair um título daí
+      // dava vazio silenciosamente e derrubava junto o selo de prioridade.
+      // Por isso o selo agora é sempre mostrado (vem do índice, não do
+      // texto), e só limpamos o prefixo "Recomendação N:" da descrição.
+      const desc = rec.replace(/^Recomendação\s*\d*\s*:\s*/i, '').trim() || rec;
       const priority = i < 2 ? 'ALTA' : 'MÉDIA';
       const prColor = i < 2 ? RED_T : YELLOW_T;
 
       const runs = [
         new TextRun({ text: `${String(i + 1).padStart(2, '0')}  `, size: 28, color: MUTED, font: 'Georgia' }),
+        new TextRun({ text: `PRIORIDADE ${priority}`, size: 16, bold: true, color: prColor }),
       ];
-      if (title) {
-        runs.push(new TextRun({ text: title + '  ', size: 22, bold: true, color: NAVY }));
-        runs.push(new TextRun({ text: priority, size: 16, bold: true, color: prColor }));
-      }
 
       return [
         new Paragraph({ children: runs, spacing: { before: 200, after: 40 } }),
-        new Paragraph({ children: [new TextRun({ text: desc || rec, size: 22, color: BODY_COLOR })], spacing: { after: 120 }, indent: { left: 560 } }),
+        new Paragraph({ children: [new TextRun({ text: desc, size: 22, color: BODY_COLOR })], spacing: { after: 120 }, indent: { left: 560 } }),
       ];
     }).flat(),
 
     new Paragraph({ spacing: { after: 320 } }),
+
+    // Bloco de assinatura — só aparece quando a análise foi assinada (ver
+    // POST /analyses/:id/sign). Sem assinatura, o relatório segue como
+    // rascunho revisável, sem essa marca de aprovação formal.
+    ...(signature?.name ? [
+      new Paragraph({ spacing: { before: 200 } }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 4 },
+        children: [new TextRun({ text: '_______________________________', size: 22, color: BORDER })],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 20 },
+        children: [new TextRun({ text: signature.name, size: 22, bold: true, color: NAVY })],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 200 },
+        children: [new TextRun({ text: `Assinado eletronicamente em ${formatSignedAt(signature.at)}`, size: 16, italics: true, color: MUTED })],
+      }),
+    ] : []),
 
     // Footer
     new Paragraph({
@@ -234,6 +291,16 @@ async function buildDocx(companyName, companyType, year, narrative) {
           margin: { top: convertInchesToTwip(0.8), bottom: convertInchesToTwip(0.8), left: convertInchesToTwip(1.0), right: convertInchesToTwip(1.0) },
         },
       },
+      footers: {
+        default: new Footer({
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new TextRun({ children: ['Página ', PageNumber.CURRENT, ' de ', PageNumber.TOTAL_PAGES], size: 16, color: MUTED })],
+            }),
+          ],
+        }),
+      },
       children,
     }],
   });
@@ -241,7 +308,7 @@ async function buildDocx(companyName, companyType, year, narrative) {
   return await Packer.toBuffer(doc);
 }
 
-export async function generateReport(companyName, companyType, year, indicators, bp, dsp, existingNarrative) {
+export async function generateReport(companyName, companyType, year, indicators, bp, dsp, existingNarrative, logo, signature) {
   const narrative = existingNarrative || await generateNarrative(companyName, companyType, year, indicators, bp, dsp);
-  return buildDocx(companyName, companyType, year, narrative);
+  return buildDocx(companyName, companyType, year, narrative, logo, signature);
 }

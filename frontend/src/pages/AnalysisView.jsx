@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile } from '../lib/api.js';
+import { useBackNavigate } from '../lib/useBackNavigate.js';
 import ConfirmModal from '../components/ConfirmModal.jsx';
 
 function AutoTextarea({ value, onChange, placeholder }) {
@@ -110,6 +111,8 @@ export default function AnalysisView() {
   const [genNarrative, setGenNarrative] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [signing, setSigning] = useState(false);
+  const goBack = useBackNavigate(analysis ? `/app/clients/${analysis.client_id}` : '/app/clients');
 
   useEffect(() => {
     api.get(`/analyses/${id}`)
@@ -150,6 +153,24 @@ export default function AnalysisView() {
     catch (e) { alert(e.message); }
   }
 
+  async function signAnalysis() {
+    setSigning(true);
+    try {
+      const r = await api.post(`/analyses/${id}/sign`);
+      setAnalysis(a => ({ ...a, status: 'signed', signed_at: r.signed_at, signed_by_name: r.signed_by_name }));
+    } catch (e) { alert(e.message); }
+    finally { setSigning(false); }
+  }
+
+  async function unsignAnalysis() {
+    setSigning(true);
+    try {
+      await api.del(`/analyses/${id}/sign`);
+      setAnalysis(a => ({ ...a, status: 'editable', signed_at: null, signed_by_name: null }));
+    } catch (e) { alert(e.message); }
+    finally { setSigning(false); }
+  }
+
   function updateNarrative(key, val) { setNarrative(n => ({ ...n, [key]: val })); }
 
   if (loading || !analysis) return null;
@@ -164,16 +185,31 @@ export default function AnalysisView() {
   return (
     <div className="page-body" style={{ maxWidth: 1000, margin: '0 auto', width: '100%' }}>
       {/* Header */}
-      <button className="back" onClick={() => navigate(`/app/clients/${analysis.client_id}`)} style={{ marginBottom: 16 }}>
-        <i className="ti ti-arrow-left"></i> {analysis.client_name}
+      <button className="back" onClick={goBack} style={{ marginBottom: 16 }}>
+        <i className="ti ti-arrow-left"></i> Voltar
       </button>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
-          <p style={{ fontSize: 14, color: 'var(--t2)' }}>{analysis.client_name} · Exercício {analysis.year}</p>
+          <p style={{ fontSize: 14, color: 'var(--t2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>{analysis.client_name} · Exercício {analysis.year}</span>
+            {!analysis.client_active && <span className="pill pill-y">Arquivado</span>}
+            <span className={`pill ${analysis.status === 'signed' ? 'pill-g' : 'pill-b'}`}>
+              {analysis.status === 'signed' ? 'Assinada' : 'Editável'}
+            </span>
+          </p>
           <h1>Análise Financeira</h1>
         </div>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+          {analysis.status === 'signed' ? (
+            <button className="btn" onClick={unsignAnalysis} disabled={signing}>
+              {signing ? <><i className="ti ti-loader"></i> Revogando…</> : <><i className="ti ti-signature-off"></i> Revogar assinatura</>}
+            </button>
+          ) : (
+            <button className="btn" onClick={signAnalysis} disabled={signing}>
+              {signing ? <><i className="ti ti-loader"></i> Assinando…</> : <><i className="ti ti-signature"></i> Assinar</>}
+            </button>
+          )}
           <button className="btn btn-p" onClick={downloadReport} disabled={reporting}>
             {reporting ? <><i className="ti ti-loader"></i> Gerando…</> : <><i className="ti ti-file-download"></i> Baixar DOCX</>}
           </button>
@@ -190,6 +226,18 @@ export default function AnalysisView() {
           </button>
         </div>
       </div>
+
+      {analysis.status === 'signed' && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: '10px 14px',
+          background: 'var(--green-dim)', border: '1px solid var(--green-t)', borderRadius: 8, fontSize: 13, color: 'var(--green-t)',
+        }}>
+          <i className="ti ti-signature" style={{ fontSize: 16 }}></i>
+          Assinada por <strong>{analysis.signed_by_name || 'alguém do escritório'}</strong>
+          {analysis.signed_at && ` em ${new Date(analysis.signed_at.includes('T') ? analysis.signed_at : `${analysis.signed_at.replace(' ', 'T')}Z`).toLocaleString('pt-BR')}`}
+          — edição bloqueada. Revogue a assinatura para editar.
+        </div>
+      )}
 
       {reportErr && <div className="err-banner" style={{ marginBottom: 16 }}>{reportErr}</div>}
 
@@ -462,7 +510,7 @@ export default function AnalysisView() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
             <h2 style={{ fontSize: 20 }}>Relatório de Análise</h2>
             <div style={{ display: 'flex', gap: 8 }}>
-              {narrative && <>
+              {narrative && analysis.status !== 'signed' && <>
                 <button className="btn" onClick={() => editMode ? saveNarrative() : setEditMode(true)} disabled={saving}>
                   <i className={`ti ${editMode ? 'ti-check' : 'ti-edit'}`}></i>
                   {editMode ? (saving ? 'Salvando…' : 'Salvar') : 'Editar'}

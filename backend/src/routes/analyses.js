@@ -15,8 +15,8 @@ router.get('/', async (req, res, next) => {
     const { page = 1, limit = 20, clientId } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     let sql = `
-      SELECT a.id, a.year, a.status, a.confidence, a.created_at,
-        c.id AS client_id, c.name AS client_name,
+      SELECT a.id, a.year, a.status, a.confidence, a.created_at, a.signed_at,
+        c.id AS client_id, c.name AS client_name, c.active AS client_active,
         u.name AS user_name, u.avatar AS user_avatar, u.avatar_color AS user_avatar_color
       FROM analyses a
       JOIN clients c ON c.id = a.client_id
@@ -36,8 +36,10 @@ router.get('/', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const analysis = await db.prepare(`
-      SELECT a.*, c.name AS client_name, c.type AS company_type, c.tenant_id
+      SELECT a.*, c.name AS client_name, c.type AS company_type, c.tenant_id, c.active AS client_active,
+        su.name AS signed_by_name
       FROM analyses a JOIN clients c ON c.id = a.client_id
+      LEFT JOIN users su ON su.id = a.signed_by
       WHERE a.id = ?
     `).get(req.params.id);
 
@@ -63,8 +65,9 @@ router.delete('/:id', async (req, res, next) => {
 router.get('/:id/report', async (req, res, next) => {
   try {
     const analysis = await db.prepare(`
-      SELECT a.*, c.name AS client_name, c.type AS company_type, c.tenant_id
+      SELECT a.*, c.name AS client_name, c.type AS company_type, c.tenant_id, su.name AS signed_by_name
       FROM analyses a JOIN clients c ON c.id = a.client_id
+      LEFT JOIN users su ON su.id = a.signed_by
       WHERE a.id = ?
     `).get(req.params.id);
 
@@ -79,6 +82,8 @@ router.get('/:id/report', async (req, res, next) => {
       parsed.bp,
       parsed.dsp,
       parsed.narrative,
+      req.user.tenant_logo,
+      analysis.status === 'signed' ? { name: analysis.signed_by_name, at: analysis.signed_at } : null,
     );
 
     const safeName = (analysis.client_name || 'cliente').replace(/[^a-zA-Z0-9À-ÿ._-]/g, '_');
@@ -135,12 +140,47 @@ router.post('/:id/narrative', async (req, res, next) => {
 router.patch('/:id/narrative', async (req, res, next) => {
   try {
     const analysis = await db.prepare(`
-      SELECT a.id, c.tenant_id FROM analyses a JOIN clients c ON c.id = a.client_id WHERE a.id = ?
+      SELECT a.id, a.status, c.tenant_id FROM analyses a JOIN clients c ON c.id = a.client_id WHERE a.id = ?
     `).get(req.params.id);
     if (!analysis || analysis.tenant_id !== req.user.tenant_id) throw badRequest('Análise não encontrada.');
+    if (analysis.status === 'signed') throw badRequest('Análise assinada não pode ser editada. Revogue a assinatura antes.');
     if (!req.body?.narrative) throw badRequest('Dados do relatório obrigatórios.');
     await db.prepare('UPDATE analyses SET narrative = ? WHERE id = ?').run(JSON.stringify(req.body.narrative), req.params.id);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// POST /analyses/:id/sign — trava a análise e estampa a assinatura no relatório.
+router.post('/:id/sign', async (req, res, next) => {
+  try {
+    const analysis = await db.prepare(`
+      SELECT a.id, a.status, c.tenant_id, c.name AS client_name FROM analyses a JOIN clients c ON c.id = a.client_id WHERE a.id = ?
+    `).get(req.params.id);
+    if (!analysis || analysis.tenant_id !== req.user.tenant_id) throw badRequest('Análise não encontrada.');
+    if (analysis.status === 'signed') throw badRequest('Análise já está assinada.');
+
+    await db.prepare(`UPDATE analyses SET status = 'signed', signed_at = CURRENT_TIMESTAMP, signed_by = ? WHERE id = ?`)
+      .run(req.user.id, req.params.id);
+    await audit(req, ACTIONS.ANALYSIS_SIGNED, { targetType: 'analysis', targetId: req.params.id, targetLabel: analysis.client_name });
+
+    const updated = await db.prepare(`
+      SELECT a.signed_at, su.name AS signed_by_name FROM analyses a LEFT JOIN users su ON su.id = a.signed_by WHERE a.id = ?
+    `).get(req.params.id);
+    res.json({ ok: true, status: 'signed', signed_at: updated.signed_at, signed_by_name: updated.signed_by_name });
+  } catch (e) { next(e); }
+});
+
+// DELETE /analyses/:id/sign — revoga a assinatura, volta a permitir edição.
+router.delete('/:id/sign', async (req, res, next) => {
+  try {
+    const analysis = await db.prepare(`
+      SELECT a.id, c.tenant_id, c.name AS client_name FROM analyses a JOIN clients c ON c.id = a.client_id WHERE a.id = ?
+    `).get(req.params.id);
+    if (!analysis || analysis.tenant_id !== req.user.tenant_id) throw badRequest('Análise não encontrada.');
+
+    await db.prepare(`UPDATE analyses SET status = 'editable', signed_at = NULL, signed_by = NULL WHERE id = ?`).run(req.params.id);
+    await audit(req, ACTIONS.ANALYSIS_UNSIGNED, { targetType: 'analysis', targetId: req.params.id, targetLabel: analysis.client_name });
+    res.json({ ok: true, status: 'editable' });
   } catch (e) { next(e); }
 });
 

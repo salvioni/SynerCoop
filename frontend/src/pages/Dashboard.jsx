@@ -77,7 +77,7 @@ export default function Dashboard() {
                   Exercício {a.year} · {new Date(a.created_at).toLocaleDateString('pt-BR')}
                 </div>
               </div>
-              <span className="pill pill-g">Concluída</span>
+              <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{a.status === 'signed' ? 'Assinada' : 'Editável'}</span>
             </div>
           )) : (
             <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--t3)', fontSize: 14 }}>
@@ -108,7 +108,7 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-          <button className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={() => navigate('/app/settings')}>
+          <button className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={() => navigate('/app/settings#escritorio')}>
             Gerenciar escritório
           </button>
         </div>

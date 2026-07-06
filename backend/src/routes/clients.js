@@ -104,7 +104,7 @@ router.get('/:id', async (req, res, next) => {
     if (!client) throw badRequest('Cliente não encontrado.');
 
     const analyses = await db.prepare(`
-      SELECT id, year, status, confidence, bp, dsp, indicators, created_at, updated_at
+      SELECT id, year, status, confidence, bp, dsp, indicators, created_at, updated_at, signed_at, signed_by
       FROM analyses WHERE client_id = ? ORDER BY year DESC
     `).all(req.params.id);
 
@@ -241,7 +241,7 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
 
     await db.prepare(`
       INSERT INTO analyses (id, client_id, year, bp, dsp, indicators, confidence, notes, narrative, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'done', ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'editable', ?)
     `).run(id, client.id, year, JSON.stringify(bpData), JSON.stringify(dspData), JSON.stringify(indicators), confidence, notes, narrative ? JSON.stringify(narrative) : null, req.user.id);
 
     const analysis = await db.prepare('SELECT * FROM analyses WHERE id = ?').get(id);

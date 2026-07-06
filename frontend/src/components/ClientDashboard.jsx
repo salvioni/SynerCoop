@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, ApiError } from '../lib/api.js';
+import { api } from '../lib/api.js';
+import { useBackNavigate } from '../lib/useBackNavigate.js';
 import ConfirmModal from './ConfirmModal.jsx';
-import { AVATAR_COLORS, initials } from './UserAvatar.jsx';
-import { CLIENT_TYPES } from '../lib/constants.js';
+import ClientFormModal from './ClientFormModal.jsx';
+import { initials } from './UserAvatar.jsx';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 const FMT = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact', maximumFractionDigits: 1 });
@@ -68,11 +69,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
   const [loading, setLoading] = useState(true);
   const [confirm, setConfirm] = useState(null);
   const [editModal, setEditModal] = useState(false);
-  const [form, setForm] = useState({});
-  const [errs, setErrs] = useState({});
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const logoRef = useRef(null);
+  const goBack = useBackNavigate(backHref || '/app/clients');
 
   useEffect(() => {
     api.get(`/clients/${clientId}`)
@@ -81,38 +78,26 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
       .finally(() => setLoading(false));
   }, [clientId]);
 
-  function openEdit() {
-    setForm({ name: client.name, cnpj: client.cnpj || '', type: client.type || 'cooperativa', contact_email: client.contact_email || '', contact_phone: client.contact_phone || '', notes: client.notes || '', logo: client.logo || null, logo_color: client.logo_color || null });
-    setErrs({}); setErr(''); setEditModal(true);
-  }
-
-  function pickLogo(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => setForm(p => ({ ...p, logo: ev.target.result, logo_color: null }));
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  }
-
-  async function saveEdit() {
-    if (!form.name?.trim()) { setErrs({ name: 'Informe o nome.' }); return; }
-    setBusy(true); setErr('');
-    try {
-      const r = await api.put(`/clients/${clientId}`, form);
-      setClient(r.client);
-      setEditModal(false);
-    } catch (e) {
-      if (e instanceof ApiError && e.fields) setErrs(e.fields);
-      else setErr(e.message || 'Erro ao salvar.');
-    } finally { setBusy(false); }
-  }
-
   async function deleteAnalysis(a) {
     setConfirm(null);
     try {
       await api.del(`/analyses/${a.id}`);
       setAnalyses(prev => prev.filter(x => x.id !== a.id));
+    } catch (e) { alert(e.message); }
+  }
+
+  async function archiveClient() {
+    setConfirm(null);
+    try {
+      await api.del(`/clients/${clientId}`);
+      navigate(backHref || '/app/clients');
+    } catch (e) { alert(e.message); }
+  }
+
+  async function reactivate() {
+    try {
+      const r = await api.put(`/clients/${clientId}`, { ...client, active: true });
+      setClient(r.client);
     } catch (e) { alert(e.message); }
   }
 
@@ -171,8 +156,8 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
   return (
     <div className="page-body">
       {backHref && (
-        <button className="back" onClick={() => navigate(backHref)} style={{ marginBottom: 16 }}>
-          <i className="ti ti-arrow-left"></i> Clientes
+        <button className="back" onClick={goBack} style={{ marginBottom: 16 }}>
+          <i className="ti ti-arrow-left"></i> Voltar
         </button>
       )}
 
@@ -186,7 +171,10 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
           {!client.logo && initials(client.name)}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: 56 }}>
-          <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1, fontWeight: 500 }}>{client.name}</h1>
+          <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 10, color: client.active ? 'var(--t0)' : 'var(--t3)' }}>
+            {client.name}
+            {!client.active && <span className="pill pill-y">Arquivado</span>}
+          </h1>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 14, color: 'var(--t2)' }}>
             <span style={{ textTransform: 'capitalize' }}>{client.type || 'empresa'}</span>
             {client.cnpj && <span style={{ fontFamily: 'ui-monospace, monospace' }}>{client.cnpj}</span>}
@@ -194,7 +182,25 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
           </div>
         </div>
       </div>
-      <button className="ib" title="Editar cliente" onClick={openEdit} style={{ color: 'var(--t2)', fontSize: 26 }}><i className="ti ti-edit"></i></button>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button className="ib" title="Editar cliente" onClick={() => setEditModal(true)} style={{ color: 'var(--t2)', padding: 8 }}>
+          <i className="ti ti-edit" style={{ fontSize: 22 }}></i>
+        </button>
+        {allowDelete && (client.active ? (
+          <button className="ib" title="Arquivar cliente" style={{ color: 'var(--t2)', padding: 8 }} onClick={() => setConfirm({
+            title: 'Arquivar cliente',
+            message: `"${client.name}" será movido para arquivados. O histórico de análises é mantido e você pode reativá-lo quando quiser.`,
+            confirmLabel: 'Arquivar', danger: true,
+            onConfirm: archiveClient,
+          })}>
+            <i className="ti ti-archive" style={{ fontSize: 22 }}></i>
+          </button>
+        ) : (
+          <button className="ib" title="Reativar cliente" onClick={reactivate} style={{ color: 'var(--t2)', padding: 8 }}>
+            <i className="ti ti-archive-off" style={{ fontSize: 22 }}></i>
+          </button>
+        ))}
+      </div>
       </div>
 
       {/* Summary stats */}
@@ -351,7 +357,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                   {new Date(a.created_at).toLocaleDateString('pt-BR')}
                 </div>
               </div>
-              <span className="pill pill-g">Concluída</span>
+              <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{a.status === 'signed' ? 'Assinada' : 'Editável'}</span>
               <div onClick={e => e.stopPropagation()}>
                 <button className="ib ib-d" title="Excluir" onClick={() => setConfirm({
                   title: `Excluir análise ${a.year}?`,
@@ -371,79 +377,11 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
       {confirm && <ConfirmModal {...confirm} onClose={() => setConfirm(null)} />}
 
       {editModal && (
-        <div className="overlay" onClick={e => { if (e.target === e.currentTarget) setEditModal(false); }}>
-          <div className="modal">
-            <div className="modal-head">
-              <span className="modal-title">Editar cliente</span>
-              <button className="modal-close" onClick={() => setEditModal(false)}><i className="ti ti-x"></i></button>
-            </div>
-            <div className="modal-body">
-              {err && <div className="err-banner">{err}</div>}
-              <div className="inp-wrap" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div className="cl-logo-pick" onClick={() => logoRef.current?.click()}>
-                  <div className="cl-card-av" style={{ width: 56, height: 56, borderRadius: 14, fontSize: 18, ...(form.logo ? { backgroundImage: `url(${form.logo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : form.logo_color ? { background: form.logo_color } : {}) }}>
-                    {!form.logo && initials(form.name)}
-                  </div>
-                  <div className="cl-logo-pick-ov" style={{ borderRadius: 14 }}>
-                    <i className="ti ti-camera" style={{ fontSize: 18, color: '#fff' }}></i>
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t0)', marginBottom: 8 }}>Logo <span style={{ color: 'var(--t3)', fontWeight: 400 }}>(opcional)</span></div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                    {AVATAR_COLORS.map(c => (
-                      <button key={c.value} type="button" title={c.label} onClick={() => setForm(p => ({ ...p, logo_color: c.value, logo: null }))} style={{ width: 22, height: 22, borderRadius: '50%', background: c.value, border: form.logo_color === c.value ? '2px solid var(--gold)' : '2px solid transparent', cursor: 'pointer', padding: 0 }} />
-                    ))}
-                  </div>
-                  {(form.logo || form.logo_color) && (
-                    <button type="button" style={{ background: 'none', border: 'none', padding: 0, fontSize: 12, color: 'var(--red-t)', cursor: 'pointer' }} onClick={() => setForm(p => ({ ...p, logo: null, logo_color: null }))}>
-                      Remover
-                    </button>
-                  )}
-                </div>
-                <input ref={logoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={pickLogo} />
-              </div>
-              <div className="inp-wrap">
-                <label className="inp-label">Nome *</label>
-                <input className={`inp${errs.name ? ' inp-err' : ''}`} value={form.name || ''} onChange={e => { setForm(p => ({ ...p, name: e.target.value })); setErrs(p => ({ ...p, name: '' })); }} autoFocus />
-                {errs.name && <div className="inp-hint">{errs.name}</div>}
-              </div>
-              <div className="inp-wrap">
-                <label className="inp-label">Tipo</label>
-                <select className="inp" value={form.type || 'cooperativa'} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}>
-                  {CLIENT_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
-                </select>
-              </div>
-              <div className="inp-wrap">
-                <label className="inp-label">CNPJ</label>
-                <input className="inp" placeholder="00.000.000/0001-00" value={form.cnpj || ''} onChange={e => setForm(p => ({ ...p, cnpj: e.target.value }))} />
-              </div>
-              <div className="inp-wrap">
-                <label className="inp-label">E-mail de contato</label>
-                <input className="inp" type="email" value={form.contact_email || ''} onChange={e => setForm(p => ({ ...p, contact_email: e.target.value }))} />
-              </div>
-              <div className="inp-wrap">
-                <label className="inp-label">Telefone</label>
-                <input className="inp" value={form.contact_phone || ''} onChange={e => setForm(p => ({ ...p, contact_phone: e.target.value }))} />
-              </div>
-              <div className="inp-wrap" style={{ marginBottom: 0 }}>
-                <label className="inp-label">Observações</label>
-                <textarea className="inp" rows={2} style={{ resize: 'vertical' }} value={form.notes || ''} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
-              </div>
-            </div>
-            <div className="modal-foot" style={{ justifyContent: allowDelete ? 'space-between' : 'flex-end' }}>
-              {allowDelete && (
-                <button className="btn btn-d" onClick={() => { setEditModal(false); setConfirm({ title: 'Excluir cliente', message: `"${client.name}" será removido permanentemente.`, confirmLabel: 'Excluir', danger: true, onConfirm: async () => { try { await api.del(`/clients/${clientId}`); navigate(backHref || '/app/clients'); } catch (e) { alert(e.message); } } }); }}>
-                  <i className="ti ti-trash"></i> Excluir cliente
-                </button>
-              )}
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn" onClick={() => setEditModal(false)}>Cancelar</button>
-                <button className="btn btn-p" onClick={saveEdit} disabled={busy}>{busy ? 'Salvando…' : <><i className="ti ti-check"></i> Salvar</>}</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ClientFormModal
+          client={client}
+          onClose={() => setEditModal(false)}
+          onSaved={c => { setClient(c); setEditModal(false); }}
+        />
       )}
     </div>
   );

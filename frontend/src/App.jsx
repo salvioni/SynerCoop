@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/auth.jsx';
 import { ThemeProvider } from './lib/theme.jsx';
+import { AccountInfoProvider } from './lib/accountInfo.jsx';
 import Login from './pages/Login.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
@@ -71,7 +72,7 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route path="/select-plan" element={<PlanGuard><SelectPlan /></PlanGuard>} />
-      <Route path="/app" element={<Guard><AppShell /></Guard>}>
+      <Route path="/app" element={<Guard><AccountInfoProvider><AppShell /></AccountInfoProvider></Guard>}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="clients" element={<SingleEntityGuard><Clients /></SingleEntityGuard>} />

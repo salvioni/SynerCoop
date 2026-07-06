@@ -5,7 +5,7 @@ import FilterSelect from '../components/FilterSelect.jsx';
 import UserAvatar from '../components/UserAvatar.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 
-const STATUS_LABELS = { done: 'Concluída', processing: 'Processando', draft: 'Rascunho' };
+const STATUS_LABELS = { editable: 'Editável', signed: 'Assinada' };
 
 export default function AnalysesList() {
   const navigate = useNavigate();
@@ -52,9 +52,8 @@ export default function AnalysesList() {
           searchable={false}
           options={[
             { value: '', label: 'Todos status' },
-            { value: 'done', label: 'Concluída' },
-            { value: 'processing', label: 'Processando' },
-            { value: 'draft', label: 'Rascunho' },
+            { value: 'editable', label: 'Editável' },
+            { value: 'signed', label: 'Assinada' },
           ]}
         />
         <FilterSelect
@@ -86,7 +85,12 @@ export default function AnalysesList() {
             <tbody>
               {filtered.map(a => (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/app/analyses/${a.id}`)}>
-                  <td>{a.client_name || 'Cliente'}</td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      {a.client_name || 'Cliente'}
+                      {!a.client_active && <span className="pill pill-y">Arquivado</span>}
+                    </span>
+                  </td>
                   <td>{a.year}</td>
                   <td>
                     {a.user_name ? (
@@ -97,7 +101,7 @@ export default function AnalysesList() {
                     ) : '—'}
                   </td>
                   <td>{new Date(a.created_at).toLocaleDateString('pt-BR')}</td>
-                  <td><span className="pill pill-g">{STATUS_LABELS[a.status] || a.status}</span></td>
+                  <td><span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{STATUS_LABELS[a.status] || a.status}</span></td>
                 </tr>
               ))}
               {!filtered.length && (

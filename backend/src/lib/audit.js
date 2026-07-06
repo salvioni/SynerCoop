@@ -7,6 +7,8 @@ export const ACTIONS = {
   CLIENT_DELETED:   'client.deleted',
   ANALYSIS_CREATED: 'analysis.created',
   ANALYSIS_DELETED: 'analysis.deleted',
+  ANALYSIS_SIGNED:   'analysis.signed',
+  ANALYSIS_UNSIGNED: 'analysis.unsigned',
   REPORT_GENERATED: 'report.generated',
   USER_INVITED:     'user.invited',
   USER_REMOVED:     'user.removed',

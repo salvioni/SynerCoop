@@ -172,7 +172,7 @@ export async function initDb() {
       bp TEXT NOT NULL DEFAULT '{}',
       dsp TEXT NOT NULL DEFAULT '{}',
       indicators TEXT NOT NULL DEFAULT '{}',
-      status TEXT DEFAULT 'done',
+      status TEXT DEFAULT 'editable',
       confidence REAL,
       notes TEXT,
       narrative TEXT,
@@ -258,6 +258,16 @@ export async function initDb() {
     // pagante cuja assinatura expira ficaria indistinguível de um cadastro
     // nunca finalizado (ver POST /auth/register).
     `ALTER TABLE tenants ADD COLUMN onboarded_at TIMESTAMP`,
+    // Logo do escritório/empresa (base64), usado na marca branca dos relatórios.
+    `ALTER TABLE tenants ADD COLUMN logo TEXT`,
+    // Assinatura da análise — quando preenchido, trava edição da narrativa e
+    // estampa "assinado por X em Y" no relatório baixável (ver lib/report.js).
+    `ALTER TABLE analyses ADD COLUMN signed_at TIMESTAMP`,
+    `ALTER TABLE analyses ADD COLUMN signed_by TEXT`,
+    // 'done' era o único valor usado antes de existir o estado 'signed' —
+    // migra os registros antigos para o novo vocabulário (idempotente: só
+    // afeta linhas que ainda não foram assinadas).
+    `UPDATE analyses SET status = 'editable' WHERE status = 'done'`,
   ]) {
     try { await db.exec(sql); } catch { /* já aplicado ou não suportado pelo driver */ }
   }
