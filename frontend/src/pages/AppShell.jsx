@@ -5,12 +5,8 @@ import { api } from '../lib/api.js';
 import { getPlan } from '../lib/plans.js';
 import UserAvatar from '../components/UserAvatar.jsx';
 
-function initials(name) {
-  return name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-}
-
 export default function AppShell() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isSingleEntity } = useAuth();
   const navigate = useNavigate();
   const [accountInfo, setAccountInfo] = useState(null);
   useEffect(() => { api.get('/account').then(setAccountInfo).catch(() => {}); }, []);
@@ -45,9 +41,11 @@ export default function AppShell() {
           <NavLink to="/app/dashboard" className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
             <i className="ti ti-home" aria-hidden="true"></i> Visão geral
           </NavLink>
-          <NavLink to="/app/clients" className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
-            <i className="ti ti-building" aria-hidden="true"></i> Clientes
-          </NavLink>
+          {!isSingleEntity && (
+            <NavLink to="/app/clients" className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
+              <i className="ti ti-building" aria-hidden="true"></i> Clientes
+            </NavLink>
+          )}
           <NavLink to="/app/analyses" end className={({ isActive }) => `s-link${isActive ? ' active' : ''}`}>
             <i className="ti ti-chart-bar" aria-hidden="true"></i> Análises
           </NavLink>
@@ -97,9 +95,11 @@ export default function AppShell() {
         <NavLink to="/app/dashboard" className={({ isActive }) => isActive ? 'active' : ''}>
           <i className="ti ti-home"></i> Início
         </NavLink>
-        <NavLink to="/app/clients" className={({ isActive }) => isActive ? 'active' : ''}>
-          <i className="ti ti-building"></i> Clientes
-        </NavLink>
+        {!isSingleEntity && (
+          <NavLink to="/app/clients" className={({ isActive }) => isActive ? 'active' : ''}>
+            <i className="ti ti-building"></i> Clientes
+          </NavLink>
+        )}
         <button className="bottom-nav-cta" onClick={() => navigate('/app/analyses/new')}>
           <i className="ti ti-plus"></i>
         </button>

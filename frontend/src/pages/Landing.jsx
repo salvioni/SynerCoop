@@ -1,4 +1,11 @@
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../lib/auth.jsx';
+import { ApiError } from '../lib/api.js';
+import { DEMO_ACCOUNTS } from '../lib/constants.js';
+import { PLANS as PLAN_INFO, PLAN_ORDER } from '../lib/plans.js';
+
+const DEMO_ORDER = ['empresa', 'admin', 'escritorio', 'associacao', 'outro', 'cooperativa'];
 
 const STEPS = [
   { n: '01', icon: 'ti-upload', t: 'Suba o balanço', d: 'Faça upload do balanço patrimonial e DRE em PDF ou Excel da empresa cliente.' },
@@ -16,11 +23,7 @@ const INDICATORS = [
   'Recomendações estratégicas geradas por IA',
 ];
 
-const PLANS = [
-  { name: 'Free', price: 'R$ 0', desc: 'Para testar com 1 ou 2 clientes.', feats: ['3 análises por mês', '1 usuário', 'Relatório padrão'], cta: 'Começar grátis' },
-  { name: 'Pro', price: 'R$ 297', desc: 'Para escritórios em operação.', feats: ['100 análises/mês', 'Até 5 usuários', 'Relatório personalizado', 'Exportação PDF/Word'], highlight: true, cta: 'Assinar Pro' },
-  { name: 'Enterprise', price: 'Sob consulta', desc: 'Para grandes operações.', feats: ['Análises ilimitadas', 'Usuários ilimitados', 'API + integrações', 'Suporte dedicado'], cta: 'Falar com vendas' },
-];
+const PLANS = PLAN_ORDER.map(k => PLAN_INFO[k]);
 
 const PREVIEW = [
   { l: 'Liquidez Corrente', v: '1,47', s: 'Bom', c: 'var(--green-t)' },
@@ -29,6 +32,26 @@ const PREVIEW = [
 ];
 
 export default function Landing() {
+  const navigate = useNavigate();
+  const { login } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  function goAfterAuth(user) {
+    navigate(user.role === 'admin' ? '/admin' : '/app/dashboard');
+  }
+
+  async function demoLogin(key) {
+    setBusy(true); setErr('');
+    try {
+      const acc = DEMO_ACCOUNTS[key];
+      const user = await login(acc.email, acc.password);
+      goAfterAuth(user);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Não foi possível entrar.');
+    } finally { setBusy(false); }
+  }
+
   return (
     <div className="landing">
       {/* Header */}
@@ -100,6 +123,31 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Demonstração — entrar direto com uma conta de exemplo */}
+      <section className="ld-container" style={{ paddingBottom: 80 }}>
+        <div style={{ maxWidth: 560, marginBottom: 24 }}>
+          <div className="ld-section-label">Ver na prática</div>
+          <h2 className="ld-section-title">Entre com uma conta de demonstração.</h2>
+          <p style={{ color: 'var(--t2)', marginTop: 8 }}>
+            Sem cadastro — escolha um tipo de conta pra ver o painel funcionando.
+          </p>
+        </div>
+
+        {err && <div className="err-banner" style={{ marginBottom: 16, maxWidth: 480 }}>{err}</div>}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, maxWidth: 720 }}>
+          {DEMO_ORDER.map(key => {
+            const acc = DEMO_ACCOUNTS[key];
+            return (
+              <button key={key} type="button" onClick={() => demoLogin(key)} disabled={busy}
+                className="btn" style={{ width: '100%', justifyContent: 'center' }}>
+                <i className={`ti ${acc.icon}`}></i> Entrar como {acc.label} (demo)
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       {/* Como funciona */}
       <section id="fluxo" className="ld-section-alt">
         <div className="ld-container" style={{ paddingTop: 80, paddingBottom: 80 }}>
@@ -155,9 +203,9 @@ export default function Landing() {
           </div>
           <div className="ld-plans">
             {PLANS.map(p => (
-              <div key={p.name} className={`ld-plan${p.highlight ? ' ld-plan-hl' : ''}`}>
+              <div key={p.key} className={`ld-plan${p.highlight ? ' ld-plan-hl' : ''}`}>
                 {p.highlight && <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--gold)', marginBottom: 12 }}>Mais popular</div>}
-                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24 }}>{p.name}</div>
+                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24 }}>{p.label}</div>
                 <div style={{ fontFamily: 'var(--font-serif)', fontSize: 36, marginTop: 8 }}>
                   {p.price}
                   {p.price.startsWith('R$ ') && p.price !== 'R$ 0' && <span style={{ fontSize: 14, color: 'var(--t2)', fontFamily: 'var(--font-sans)' }}>/mês</span>}

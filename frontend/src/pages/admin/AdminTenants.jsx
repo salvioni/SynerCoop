@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api, ApiError } from '../../lib/api.js';
 import ConfirmModal from '../../components/ConfirmModal.jsx';
+import { useResource } from '../../lib/useResource.js';
 
 export default function AdminTenants() {
-  const [tenants, setTenants] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { data: tenants = [], loading, reload: load } = useResource('/admin/tenants', r => r.tenants || []);
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newErr, setNewErr] = useState('');
@@ -15,14 +15,7 @@ export default function AdminTenants() {
   const [inviteLink, setInviteLink] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);
-
-  async function load() {
-    setLoading(true);
-    try { const r = await api.get('/admin/tenants'); setTenants(r.tenants || []); }
-    finally { setLoading(false); }
-  }
-
-  useEffect(() => { load(); }, []);
+  const [actionErr, setActionErr] = useState('');
 
   async function createTenant() {
     if (!newName.trim()) { setNewErr('Informe o nome.'); return; }
@@ -59,7 +52,7 @@ export default function AdminTenants() {
       onConfirm: async () => {
         setConfirm(null);
         try { await api.patch(`/admin/tenants/${t.id}/toggle`); load(); }
-        catch (e) { alert(e.message); }
+        catch (e) { setActionErr(e.message); }
       },
     });
   }
@@ -77,6 +70,7 @@ export default function AdminTenants() {
       </div>
 
       <div className="page-body">
+        {actionErr && <div className="err-banner" style={{ marginBottom: 16 }}>{actionErr}</div>}
         {loading ? (
           <div style={{ color: 'var(--t2)' }}>Carregando…</div>
         ) : (

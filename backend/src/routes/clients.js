@@ -5,10 +5,12 @@ import { db } from '../lib/db.js';
 import { authRequired } from '../middleware/auth.js';
 import { badRequest, trim } from '../lib/validate.js';
 import { audit, ACTIONS } from '../lib/audit.js';
+import logger from '../lib/logger.js';
 import { extractFromFile } from '../lib/extractor.js';
 import { calculateIndicators } from '../lib/calculator.js';
-import { generateText } from '../lib/llm.js';
+import { generateAnalysisNarrative } from '../lib/narrative.js';
 import { PLAN_LIMITS } from '../lib/plans.js';
+import { startOfMonthISO } from '../lib/date.js';
 
 const ALLOWED_MIMES = new Set([
   'application/pdf',
@@ -70,8 +72,12 @@ router.post('/', async (req, res, next) => {
     const contact_email = trim(req.body?.contact_email) || null;
     const contact_phone = trim(req.body?.contact_phone) || null;
     const notes = trim(req.body?.notes) || null;
+    const logo = req.body?.logo || null;
+    const logo_color = req.body?.logo_color || null;
 
     if (!name) throw badRequest('Nome é obrigatório.', { name: 'Informe o nome da empresa.' });
+    if (logo && logo.length > 2 * 1024 * 1024 * 1.4) throw badRequest('Imagem muito grande. Máximo 2 MB.');
+    if (logo_color && !/^#[0-9A-Fa-f]{6}$/.test(logo_color)) throw badRequest('Cor inválida.');
 
     const existing = cnpj
       ? await db.prepare('SELECT id FROM clients WHERE cnpj = ? AND tenant_id = ?').get(cnpj, req.user.tenant_id)
@@ -80,9 +86,9 @@ router.post('/', async (req, res, next) => {
 
     const id = nanoid(10);
     await db.prepare(`
-      INSERT INTO clients (id, tenant_id, name, cnpj, type, contact_email, contact_phone, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, req.user.tenant_id, name, cnpj, type, contact_email, contact_phone, notes);
+      INSERT INTO clients (id, tenant_id, name, cnpj, type, contact_email, contact_phone, notes, logo, logo_color)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, req.user.tenant_id, name, cnpj, type, contact_email, contact_phone, notes, logo, logo_color);
 
     const client = await db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
     await audit(req, ACTIONS.CLIENT_CREATED, { targetType: 'client', targetId: id, targetLabel: name });
@@ -121,13 +127,19 @@ router.put('/:id', async (req, res, next) => {
     const contact_phone = trim(req.body?.contact_phone) || null;
     const notes = trim(req.body?.notes) || null;
     const active = req.body?.active !== undefined ? (req.body.active ? 1 : 0) : 1;
+    const logo = req.body?.logo !== undefined ? (req.body.logo || null) : undefined;
+    const logo_color = req.body?.logo_color !== undefined ? (req.body.logo_color || null) : undefined;
 
     if (!name) throw badRequest('Nome é obrigatório.', { name: 'Informe o nome da empresa.' });
+    if (logo && logo.length > 2 * 1024 * 1024 * 1.4) throw badRequest('Imagem muito grande. Máximo 2 MB.');
+    if (logo_color && !/^#[0-9A-Fa-f]{6}$/.test(logo_color)) throw badRequest('Cor inválida.');
 
+    const extraCols = [...(logo !== undefined ? [', logo = ?'] : []), ...(logo_color !== undefined ? [', logo_color = ?'] : [])].join('');
+    const extraVals = [...(logo !== undefined ? [logo] : []), ...(logo_color !== undefined ? [logo_color] : [])];
     await db.prepare(`
-      UPDATE clients SET name = ?, cnpj = ?, type = ?, contact_email = ?, contact_phone = ?, notes = ?, active = ?
+      UPDATE clients SET name = ?, cnpj = ?, type = ?, contact_email = ?, contact_phone = ?, notes = ?, active = ?${extraCols}
       WHERE id = ?
-    `).run(name, cnpj, type, contact_email, contact_phone, notes, active, id);
+    `).run(name, cnpj, type, contact_email, contact_phone, notes, active, ...extraVals, id);
 
     const client = await db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
     await audit(req, ACTIONS.CLIENT_UPDATED, { targetType: 'client', targetId: id, targetLabel: name });
@@ -142,6 +154,7 @@ router.delete('/:id', async (req, res, next) => {
     const client = await db.prepare('SELECT id, name FROM clients WHERE id = ? AND tenant_id = ?')
       .get(id, req.user.tenant_id);
     if (!client) throw badRequest('Cliente não encontrado.');
+    if (req.user.self_client_id === id) throw badRequest('Não é possível excluir a própria empresa.');
 
     // Soft delete
     await db.prepare('UPDATE clients SET active = 0 WHERE id = ?').run(id);
@@ -159,7 +172,7 @@ router.post('/:id/extract', upload.single('file'), async (req, res, next) => {
     if (!req.file) throw badRequest('Nenhum arquivo enviado.');
 
     const extracted = await extractFromFile(req.file.buffer, req.file.originalname, client.name);
-    console.log('[extract]', req.file.originalname, '→ confidence:', extracted.confidence, 'notes:', extracted.notes, 'total_ativo:', extracted.bp?.total_ativo, 'receita_liquida:', extracted.dsp?.receita_liquida);
+    logger.info({ file: req.file.originalname, confidence: extracted.confidence, total_ativo: extracted.bp?.total_ativo, receita_liquida: extracted.dsp?.receita_liquida }, 'extract');
     res.json({ extracted });
   } catch (e) { next(e); }
 });
@@ -177,8 +190,8 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
       const monthly = await db.prepare(`
         SELECT COUNT(*) AS cnt FROM analyses a
         JOIN clients c ON c.id = a.client_id
-        WHERE c.tenant_id = ? AND a.created_at >= date('now', 'start of month')
-      `).get(req.user.tenant_id);
+        WHERE c.tenant_id = ? AND a.created_at >= ?
+      `).get(req.user.tenant_id, startOfMonthISO());
       if ((monthly?.cnt || 0) >= limit) {
         throw badRequest(`Limite de ${limit} análises/mês atingido no plano ${(tenant?.plan || 'trial').toUpperCase()}. Faça upgrade para continuar.`);
       }
@@ -214,50 +227,16 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
 
     const id = nanoid(10);
 
-    // Gerar narrative via IA
+    // Gerar narrative via IA — falha aqui não impede salvar a análise, só
+    // fica sem narrativa (pode ser gerada depois via POST /analyses/:id/narrative).
     let narrative = null;
     try {
-      const narrativePrompt = `Você é um analista financeiro especializado em cooperativas brasileiras.
-Com base nos indicadores financeiros abaixo, gere um relatório de análise detalhado e profissional.
-
-Empresa: ${client.name}
-Tipo: ${client.type || 'cooperativa'}
-Exercício: ${year}
-
-INDICADORES: ${JSON.stringify(indicators, null, 2)}
-BALANÇO PATRIMONIAL: ${JSON.stringify(bpData, null, 2)}
-DSP: ${JSON.stringify(dspData, null, 2)}
-
-Retorne SOMENTE um JSON válido (sem texto antes ou depois) com esta estrutura:
-{
-  "sumario": "Parágrafo de 3-5 frases resumindo a situação financeira geral.",
-  "liquidez": "Parágrafo analisando liquidez corrente, geral, seca e imobilização. Cite os valores exatos.",
-  "rentabilidade": "Parágrafo analisando ROE, ROA, margem e EBITDA. Cite valores.",
-  "endividamento": "Parágrafo analisando endividamento total, perfil, alavancagem. Cite valores.",
-  "capacidade_operacional": "Parágrafo analisando PMR, PME, PMP, ciclo financeiro, giro. Cite valores.",
-  "tesouraria": "Parágrafo analisando capital de giro, NCG, tesouraria, independência. Cite valores.",
-  "forcas": "1-2 frases sobre pontos fortes.",
-  "fraquezas": "1-2 frases sobre pontos de atenção.",
-  "riscos": "1-2 frases sobre riscos identificados.",
-  "recomendacoes": ["Recomendação 1: descrição.", "Recomendação 2: descrição.", "Recomendação 3: descrição.", "Recomendação 4: descrição."]
-}
-
-Regras:
-- Linguagem profissional mas acessível para contadores e diretores
-- Cooperativas usam "sobras/perdas" em vez de "lucro/prejuízo"
-- Cite valores exatos dos indicadores
-- Recomendações práticas e acionáveis`;
-
-      let raw = await generateText(narrativePrompt, { maxTokens: 8000 });
-      if (raw.includes('```')) { const m = raw.match(/```(?:json)?\s*([\s\S]*?)```/); if (m) raw = m[1]; }
-      raw = raw.trim();
-      const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-      if (s >= 0 && e > s) raw = raw.substring(s, e + 1);
-      raw = raw.replace(/,\s*([}\]])/g, '$1');
-      narrative = JSON.parse(raw);
-      console.log('[narrative] Relatório gerado para', client.name, year);
+      narrative = await generateAnalysisNarrative({
+        companyName: client.name, companyType: client.type, year, indicators, bp: bpData, dsp: dspData,
+      });
+      logger.info({ client: client.name, year }, 'narrative gerado');
     } catch (err) {
-      console.warn('[narrative] Falha ao gerar relatório:', err.message);
+      logger.warn({ err: err.message }, 'narrative falhou');
     }
 
     await db.prepare(`

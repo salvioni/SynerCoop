@@ -12,6 +12,7 @@ export const ACTIONS = {
   USER_REMOVED:     'user.removed',
   USER_ROLE:        'user.role_changed',
   PW_CHANGED:       'account.password_changed',
+  PLAN_SELECTED:    'account.plan_selected',
 };
 
 export async function audit(req, action, { targetType, targetId, targetLabel, meta } = {}) {

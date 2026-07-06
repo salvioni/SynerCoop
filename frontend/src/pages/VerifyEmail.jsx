@@ -15,6 +15,7 @@ export default function VerifyEmail() {
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
   const [busy, setBusy] = useState(false);
+  const [verified, setVerified] = useState(false);
   const [cooldown, setCooldown] = useState(30);
   const ref = useRef(null);
 
@@ -36,11 +37,13 @@ export default function VerifyEmail() {
     setBusy(true);
     try {
       await verifyEmail(userId, c);
-      navigate('/app/clients', { replace: true });
+      setVerified(true);
+      setTimeout(() => navigate('/select-plan', { replace: true }), 900);
     } catch (e) {
       if (e instanceof ApiError && e.fields?.code) setErr(e.fields.code);
       else setErr(e.message || 'Código incorreto.');
-    } finally { setBusy(false); }
+      setBusy(false);
+    }
   }
 
   function onCodeChange(v) {
@@ -64,6 +67,24 @@ export default function VerifyEmail() {
   }
 
   if (!userId) return null;
+
+  if (verified) {
+    return (
+      <div className="auth-outer">
+        <div className="auth-box" style={{ textAlign: 'center' }}>
+          <div className="auth-logo" style={{ justifyContent: 'center' }}>
+            <div className="auth-logo-badge">S</div>
+            <span className="auth-logo-name">SynerCoop</span>
+          </div>
+          <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--green-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '12px auto', color: 'var(--green-t)', fontSize: 22 }}>
+            <i className="ti ti-check"></i>
+          </div>
+          <div className="auth-title">E-mail verificado!</div>
+          <div className="auth-sub">Só um instante…</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-outer">

@@ -1,17 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import { useResource } from '../lib/useResource.js';
+import UserAvatar from '../components/UserAvatar.jsx';
 import ConfirmModal from '../components/ConfirmModal.jsx';
-
-function initials(name) {
-  const p = name?.trim().split(' ').filter(Boolean) || [];
-  return p.length ? (p[0][0] + (p[1]?.[0] || '')).toUpperCase() : '?';
-}
+import PageHeader from '../components/PageHeader.jsx';
 
 export default function Users() {
   const { user: me, isManager } = useAuth();
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { data: users = [], loading, reload } = useResource('/users', r => r.users || []);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [form, setForm] = useState({ name: '', email: '' });
@@ -19,17 +16,10 @@ export default function Users() {
   const [err, setErr] = useState('');
   const [devLink, setDevLink] = useState(null);
   const [busy, setBusy] = useState(false);
-
-  async function load() {
-    setLoading(true);
-    try { const r = await api.get('/users'); setUsers(r.users || []); }
-    finally { setLoading(false); }
-  }
-
-  useEffect(() => { load(); }, []);
+  const [removeErr, setRemoveErr] = useState('');
 
   function openInvite() {
-    setForm({ name: '', email: '' }); setErrs({}); setErr(''); setDevLink(null); setInviteOpen(true);
+    setForm({ name: '', email: '' }); setErrs({}); setErr(''); setDevLink(null); setBusy(false); setInviteOpen(true);
   }
 
   function upd(k, v) { setForm(p => ({ ...p, [k]: v })); setErrs(p => ({ ...p, [k]: '' })); }
@@ -43,7 +33,7 @@ export default function Users() {
     try {
       const r = await api.post('/users/invite', { ...form, role: 'manager' });
       setDevLink(r.devLink || true);
-      load();
+      reload();
     } catch (e) {
       if (e instanceof ApiError && e.fields) setErrs(e.fields);
       else setErr(e.message || 'Erro ao enviar convite.');
@@ -52,24 +42,20 @@ export default function Users() {
 
   async function doRemove(u) {
     setConfirm(null);
-    try { await api.del(`/users/${u.id}`); load(); }
-    catch (e) { alert(e.message); }
+    try { await api.del(`/users/${u.id}`); reload(); }
+    catch (e) { setRemoveErr(e.message); }
   }
 
   return (
     <>
       <div className="page-body">
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 32 }}>
-          <div>
-            <div style={{ fontSize: 14, color: 'var(--t2)' }}>Membros do escritório</div>
-            <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 4, color: 'var(--t0)' }}>Equipe</h1>
-          </div>
-          {isManager && (
-            <button className="btn btn-p" onClick={openInvite}>
-              <i className="ti ti-plus"></i> Convidar membro
-            </button>
-          )}
-        </div>
+        <PageHeader
+          subtitle="Membros do escritório"
+          title="Equipe"
+          action={isManager && <button className="btn btn-p" onClick={openInvite}><i className="ti ti-plus"></i> Convidar membro</button>}
+        />
+
+        {removeErr && <div className="err-banner" style={{ marginBottom: 16 }}>{removeErr}</div>}
 
         {loading ? (
           <div style={{ color: 'var(--t2)', fontSize: 14, padding: '40px 0', textAlign: 'center' }}>Carregando…</div>
@@ -80,11 +66,9 @@ export default function Users() {
               const pending = !!u.invite_pending;
               return (
                 <div key={u.id} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, borderTop: i > 0 ? '1px solid var(--bd)' : 'none' }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 999, background: 'var(--blue)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
-                    {initials(u.name)}
-                  </div>
+                  <UserAvatar user={u} size={40} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, color: 'var(--t0)', fontSize: 14 }}>{u.name}</div>
+                    <div style={{ fontWeight: 500, color: 'var(--t0)', fontSize: 14 }}>{u.name}{isMe && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--t3)' }}>(você)</span>}</div>
                     <div style={{ fontSize: 12, color: 'var(--t2)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
                       <i className="ti ti-mail" style={{ fontSize: 12 }}></i> {u.email}
                     </div>
@@ -117,9 +101,7 @@ export default function Users() {
           <div className="modal">
             <div className="modal-head">
               <span className="modal-title">Convidar gerente</span>
-              <button className="modal-close" onClick={() => setInviteOpen(false)}>
-                <i className="ti ti-x"></i>
-              </button>
+              <button className="modal-close" onClick={() => setInviteOpen(false)}><i className="ti ti-x"></i></button>
             </div>
             <div className="modal-body">
               {devLink ? (
@@ -156,9 +138,7 @@ export default function Users() {
             <div className="modal-foot">
               {devLink ? (
                 <>
-                  <button className="btn" onClick={() => { setDevLink(null); setForm({ name: '', email: '' }); }}>
-                    <i className="ti ti-user-plus"></i> Convidar outro
-                  </button>
+                  <button className="btn" onClick={() => { setDevLink(null); setForm({ name: '', email: '' }); }}><i className="ti ti-user-plus"></i> Convidar outro</button>
                   <button className="btn btn-p" onClick={() => setInviteOpen(false)}>Fechar</button>
                 </>
               ) : (

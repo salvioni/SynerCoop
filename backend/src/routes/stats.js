@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../lib/db.js';
 import { authRequired } from '../middleware/auth.js';
+import { startOfMonthISO, monthsAgoISO } from '../lib/date.js';
 
 const router = Router();
 router.use(authRequired);
@@ -10,37 +11,34 @@ router.get('/', async (req, res, next) => {
   try {
     const tenantId = req.user.tenant_id;
 
-    const totalClients = await db.prepare(
-      'SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ?'
-    ).get(tenantId);
+    const [totalClients, activeClients, totalAnalyses, monthlyAnalyses, tenant] = await Promise.all([
+      db.prepare('SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ?').get(tenantId),
+      db.prepare('SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ? AND active = 1').get(tenantId),
+      db.prepare(`SELECT COUNT(*) AS cnt FROM analyses a JOIN clients c ON c.id = a.client_id WHERE c.tenant_id = ?`).get(tenantId),
+      db.prepare(`
+        SELECT COUNT(*) AS cnt FROM analyses a JOIN clients c ON c.id = a.client_id
+        WHERE c.tenant_id = ? AND a.created_at >= ?
+      `).get(tenantId, startOfMonthISO()),
+      db.prepare('SELECT plan FROM tenants WHERE id = ?').get(tenantId),
+    ]);
 
-    const activeClients = await db.prepare(
-      'SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ? AND active = 1'
-    ).get(tenantId);
+    const rawByMonth = await db.prepare(`
+      SELECT a.created_at FROM analyses a JOIN clients c ON c.id = a.client_id
+      WHERE c.tenant_id = ? AND a.created_at >= ?
+      ORDER BY a.created_at
+    `).all(tenantId, monthsAgoISO(12));
 
-    const totalAnalyses = await db.prepare(`
-      SELECT COUNT(*) AS cnt FROM analyses a
-      JOIN clients c ON c.id = a.client_id WHERE c.tenant_id = ?
-    `).get(tenantId);
+    const byMonthMap = {};
+    for (const { created_at } of rawByMonth) {
+      // new Date(...) normaliza tanto string ISO (SQLite) quanto objeto Date
+      // (node-pg retorna Date para colunas TIMESTAMP) antes de formatar.
+      const month = new Date(created_at).toISOString().slice(0, 7);
+      byMonthMap[month] = (byMonthMap[month] || 0) + 1;
+    }
+    const byMonth = Object.entries(byMonthMap)
+      .map(([month, cnt]) => ({ month, cnt }))
+      .sort((a, b) => a.month.localeCompare(b.month));
 
-    const monthlyAnalyses = await db.prepare(`
-      SELECT COUNT(*) AS cnt FROM analyses a
-      JOIN clients c ON c.id = a.client_id
-      WHERE c.tenant_id = ? AND a.created_at >= date('now', 'start of month')
-    `).get(tenantId);
-
-    const tenant = await db.prepare('SELECT plan FROM tenants WHERE id = ?').get(tenantId);
-
-    // Last 12 months of analyses
-    const byMonth = await db.prepare(`
-      SELECT strftime('%Y-%m', a.created_at) AS month, COUNT(*) AS cnt
-      FROM analyses a JOIN clients c ON c.id = a.client_id
-      WHERE c.tenant_id = ?
-        AND a.created_at >= date('now', '-12 months')
-      GROUP BY month ORDER BY month
-    `).all(tenantId);
-
-    // Recent analyses
     const recentAnalyses = await db.prepare(`
       SELECT a.id, a.year, a.status, a.created_at,
         c.id AS client_id, c.name AS client_name

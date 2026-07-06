@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import Stripe from 'stripe';
 import { db } from '../lib/db.js';
-import { authRequired, managerOnly } from '../middleware/auth.js';
+import { authRequired, managerOnly, planExempt } from '../middleware/auth.js';
 import { badRequest } from '../lib/validate.js';
 import logger from '../lib/logger.js';
 
@@ -11,18 +11,25 @@ const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
   : null;
 
+// Planos com assinatura self-serve via Stripe Checkout. Enterprise é sob
+// consulta (fluxo comercial manual), por isso não tem price aqui.
+const PLAN_PRICES = {
+  pro: process.env.STRIPE_PRICE_PRO,
+};
+
 // POST /stripe/create-checkout
-router.post('/create-checkout', authRequired, managerOnly, async (req, res, next) => {
+router.post('/create-checkout', planExempt, authRequired, managerOnly, async (req, res, next) => {
   try {
     if (!stripe) throw badRequest('Stripe não configurado.');
-    const priceId = req.body?.priceId;
-    if (!priceId) throw badRequest('priceId é obrigatório.');
+    const plan = req.body?.plan;
+    const priceId = PLAN_PRICES[plan];
+    if (!priceId) throw badRequest('Plano inválido.');
 
     const tenant = await db.prepare('SELECT * FROM tenants WHERE id = ?').get(req.user.tenant_id);
     if (!tenant) throw badRequest('Tenant não encontrado.');
 
-    const successUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/account?checkout=success`;
-    const cancelUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/account?checkout=cancelled`;
+    const successUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/select-plan?checkout=success`;
+    const cancelUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/select-plan?checkout=cancelled`;
 
     let customerId = tenant.stripe_customer_id;
     if (!customerId) {
@@ -39,6 +46,7 @@ router.post('/create-checkout', authRequired, managerOnly, async (req, res, next
       customer: customerId,
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
+      subscription_data: { metadata: { plan, tenant_id: tenant.id } },
       success_url: successUrl,
       cancel_url: cancelUrl,
     });
@@ -71,7 +79,7 @@ router.post('/webhook', async (req, res) => {
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    logger.warn('Stripe webhook signature verification failed', { err: err.message });
+    logger.warn({ err: err.message }, 'Stripe webhook signature verification failed');
     return res.sendStatus(400);
   }
 
@@ -79,15 +87,27 @@ router.post('/webhook', async (req, res) => {
     if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.created') {
       const sub = event.data.object;
       const customerId = sub.customer;
-      const plan = sub.status === 'active' ? (sub.metadata?.plan || 'pro') : null;
-      await db.prepare('UPDATE tenants SET plan = ? WHERE stripe_customer_id = ?').run(plan, customerId);
+      if (sub.status === 'active') {
+        // Assinaturas criadas fora do checkout self-serve (ex: negociadas
+        // manualmente no dashboard do Stripe para Enterprise) não têm
+        // metadata.plan — tratamos como Enterprise nesse caso.
+        const plan = sub.metadata?.plan || 'enterprise';
+        // COALESCE preserva a data original de onboarding em renovações
+        // subsequentes — só grava na primeira vez que o tenant fica ativo.
+        await db.prepare(`
+          UPDATE tenants SET plan = ?, onboarded_at = COALESCE(onboarded_at, CURRENT_TIMESTAMP)
+          WHERE stripe_customer_id = ?
+        `).run(plan, customerId);
+      } else {
+        await db.prepare('UPDATE tenants SET plan = NULL WHERE stripe_customer_id = ?').run(customerId);
+      }
     }
     if (event.type === 'customer.subscription.deleted') {
       const sub = event.data.object;
       await db.prepare('UPDATE tenants SET plan = NULL WHERE stripe_customer_id = ?').run(sub.customer);
     }
   } catch (err) {
-    logger.error('Stripe webhook handler error', { err });
+    logger.error({ err: err.message, stack: err.stack?.split('\n').slice(0, 3) }, 'Stripe webhook handler error');
   }
 
   res.sendStatus(200);

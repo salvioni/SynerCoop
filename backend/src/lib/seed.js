@@ -2,16 +2,15 @@ import { db } from './db.js';
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
 
+const IS_PROD = process.env.NODE_ENV === 'production';
+
 export async function seedDb() {
   await seedAdminUser();
 
-  const row = await db.prepare("SELECT COUNT(*) AS c FROM users WHERE role != 'admin'").get();
-  if ((row?.c ?? 0) > 0) {
-    console.log('[seed] banco já populado, pulando dados demo.');
-    return;
-  }
+  if (IS_PROD) return;
 
-  console.log('[seed] populando banco com dados demo...');
+  const row = await db.prepare("SELECT COUNT(*) AS c FROM users WHERE role != 'admin'").get();
+  if ((row?.c ?? 0) > 0) return;
 
   // Tenant demo
   const tenantId = 'demo-tenant';
@@ -19,7 +18,7 @@ export async function seedDb() {
 
   // Usuário gerente demo
   const mgrId = nanoid(10);
-  const mgrHash = bcrypt.hashSync('demo123', 10);
+  const mgrHash = await bcrypt.hash('demo123', 12);
   await db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified)
                     VALUES (?, ?, ?, ?, ?, ?, 1)`)
     .run(mgrId, tenantId, 'Gerente Demo', 'gerente@demo.com', mgrHash, 'manager');
@@ -55,7 +54,6 @@ export async function seedDb() {
     ir_csll: 0, sobras_perdas: 52000
   };
 
-  // Dados de análise 2023 (~20% menores)
   const bp2023 = {
     ativo_circulante: 840000, caixa: 275000, contas_receber_cp: 170000,
     adiantamentos: 42000, estoques: 350000, outros_creditos_cp: 3000,
@@ -78,7 +76,6 @@ export async function seedDb() {
     ir_csll: 0, sobras_perdas: 43000
   };
 
-  // Calcular indicadores para os dados demo
   const { calculateIndicators } = await import('./calculator.js');
   const indicators2024 = calculateIndicators({ bp: bp2024, dsp: dsp2024 });
   const indicators2023 = calculateIndicators({ bp: bp2023, dsp: dsp2023 });
@@ -96,17 +93,67 @@ export async function seedDb() {
     'Extraído do formato padrão Balanço Perguntado'
   );
 
-  console.log('[seed] OK — gerente@demo.com (senha demo123)');
-  console.log('[seed] Clientes demo: Cooperativa Citrus Ltda, Empresa Exemplo S.A.');
+  // Conta admin de demonstração — fixa, independente de ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD,
+  // pra sempre existir em dev sem exigir configuração de env (usada pelos botões de demo).
+  await seedDemoAdmin();
+
+  // Um tenant de demonstração por tipo de entidade única (cooperativa, empresa,
+  // associação, outro) — o tipo escritório já está coberto pelo tenant acima.
+  // Usado pelos botões "Entrar como demo" na Landing Page e no Login.
+  await seedSingleEntityDemos();
+}
+
+async function seedDemoAdmin() {
+  const email = 'admin@demo.com';
+  const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+  if (existing) return;
+  const hash = await bcrypt.hash('demo123', 12);
+  await db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified)
+                    VALUES (?, NULL, ?, ?, ?, 'admin', 1)`)
+    .run(nanoid(10), 'Admin Demo', email, hash);
+}
+
+const SINGLE_ENTITY_DEMOS = [
+  { type: 'cooperativa', sector: 'agropecuario', name: 'Cooperativa Demo', email: 'cooperativa@demo.com' },
+  { type: 'empresa', sector: 'outro', name: 'Empresa Demo', email: 'empresa@demo.com' },
+  { type: 'associacao', sector: 'outro', name: 'Associação Demo', email: 'associacao@demo.com' },
+  { type: 'outro', sector: 'outro', name: 'Conta Demo', email: 'outro@demo.com' },
+];
+
+async function seedSingleEntityDemos() {
+  for (const d of SINGLE_ENTITY_DEMOS) {
+    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(d.email);
+    if (existing) continue;
+
+    const tenantId = nanoid(10);
+    const clientId = nanoid(10);
+    const userId = nanoid(10);
+    await db.prepare('INSERT INTO tenants (id, name, plan, type, sector, self_client_id) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(tenantId, d.name, 'pro', d.type, d.sector, clientId);
+    await db.prepare('INSERT INTO clients (id, tenant_id, name, type) VALUES (?, ?, ?, ?)')
+      .run(clientId, tenantId, d.name, d.type);
+    const hash = await bcrypt.hash('demo123', 12);
+    await db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified)
+                      VALUES (?, ?, ?, ?, ?, 'manager', 1)`)
+      .run(userId, tenantId, `${d.name} (demo)`, d.email, hash);
+  }
 }
 
 async function seedAdminUser() {
-  const ins = db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified) VALUES (?, NULL, ?, ?, ?, 'admin', 1)`);
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@synercoop.internal';
+  const adminPassword = process.env.ADMIN_INITIAL_PASSWORD;
 
-  const real = await db.prepare("SELECT id FROM users WHERE email = 'admin@finanalyze.internal'").get();
+  const real = await db.prepare('SELECT id FROM users WHERE email = ?').get(adminEmail);
   if (!real) {
-    const hash = bcrypt.hashSync('admin123', 10);
-    await ins.run(nanoid(10), 'Administrador', 'admin@finanalyze.internal', hash);
-    console.log('[seed] admin criado — admin@finanalyze.internal / admin123');
+    if (!adminPassword) {
+      if (IS_PROD) {
+        throw new Error('ADMIN_INITIAL_PASSWORD não definido. Defina a variável de ambiente antes de iniciar em produção.');
+      }
+      return;
+    }
+    const hash = await bcrypt.hash(adminPassword, 12);
+    await db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified)
+                      VALUES (?, NULL, ?, ?, ?, 'admin', 1)`)
+      .run(nanoid(10), 'Administrador', adminEmail, hash);
   }
 }

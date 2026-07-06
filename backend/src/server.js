@@ -17,17 +17,11 @@ if (IS_PROD) {
 
 const app = createApp();
 
-// Log de requisições
-app.use((req, _res, next) => {
-  logger.info({ method: req.method, path: req.path }, 'request');
-  next();
-});
-
 try {
   await initDb();
   await seedDb();
   app.listen(PORT, () => {
-    logger.info({ port: PORT, env: IS_PROD ? 'production' : 'development' }, 'FinAnalyze API iniciada');
+    logger.info({ port: PORT, env: IS_PROD ? 'production' : 'development' }, 'SynerCoop API iniciada');
   });
 } catch (e) {
   logger.fatal({ err: e }, 'falha ao iniciar');

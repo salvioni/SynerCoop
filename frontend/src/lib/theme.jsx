@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 
+const KEY = 'synercoop-theme';
 const ThemeCtx = createContext({ theme: 'light', setTheme: () => {} });
 
 function applyTheme(theme) {
@@ -8,11 +9,22 @@ function applyTheme(theme) {
   document.documentElement.classList.toggle('theme-dark', isDark);
 }
 
+// Chamado antes do React montar para evitar flash de tema errado
+export function initTheme() {
+  const theme = localStorage.getItem(KEY) || 'light';
+  applyTheme(theme);
+}
+
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem('fa_theme') || 'light');
+  const [theme, setTheme] = useState(() => {
+    // Migrar chaves antigas
+    const old = localStorage.getItem('fa_theme') || localStorage.getItem('finanalyze-theme');
+    if (old) { localStorage.removeItem('fa_theme'); localStorage.removeItem('finanalyze-theme'); }
+    return localStorage.getItem(KEY) || old || 'light';
+  });
 
   useEffect(() => {
-    localStorage.setItem('fa_theme', theme);
+    localStorage.setItem(KEY, theme);
     applyTheme(theme);
 
     if (theme === 'system') {

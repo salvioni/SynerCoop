@@ -5,7 +5,7 @@ import {
   Table, TableRow, TableCell, WidthType, ShadingType, BorderStyle,
   convertInchesToTwip
 } from 'docx';
-import { generateText } from './llm.js';
+import { generateText, parseJsonFromLLM } from './llm.js';
 
 const REPORT_PROMPT = `Você é um analista financeiro especializado em cooperativas brasileiras.
 
@@ -60,21 +60,8 @@ async function generateNarrative(companyName, companyType, year, indicators, bp,
     .replace('{bp_json}', JSON.stringify(bp, null, 2))
     .replace('{dsp_json}', JSON.stringify(dsp, null, 2));
 
-  let raw = await generateText(prompt);
-
-  if (raw.startsWith('```')) {
-    const parts = raw.split('```');
-    raw = parts[1] || parts[0];
-    if (raw.startsWith('json')) raw = raw.slice(4);
-  }
-  return JSON.parse(raw.trim());
-}
-
-function hexToRgb(hex) {
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  return { r, g, b };
+  const raw = await generateText(prompt);
+  return parseJsonFromLLM(raw);
 }
 
 const NAVY = '0D1E3B';
@@ -137,7 +124,7 @@ function makeSwotCell(label, text, bgHex, colorHex) {
   });
 }
 
-async function buildDocx(companyName, companyType, year, narrative, indicators) {
+async function buildDocx(companyName, companyType, year, narrative) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('pt-BR');
 
@@ -256,5 +243,5 @@ async function buildDocx(companyName, companyType, year, narrative, indicators) 
 
 export async function generateReport(companyName, companyType, year, indicators, bp, dsp, existingNarrative) {
   const narrative = existingNarrative || await generateNarrative(companyName, companyType, year, indicators, bp, dsp);
-  return buildDocx(companyName, companyType, year, narrative, indicators);
+  return buildDocx(companyName, companyType, year, narrative);
 }

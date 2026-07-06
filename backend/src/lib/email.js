@@ -1,16 +1,15 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-const APP_NAME = 'FinAnalyze';
+const APP_NAME = 'SynerCoop';
+const IS_PROD = process.env.NODE_ENV === 'production';
 
-function getTransporter() {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-}
+// Envia via API HTTPS (porta 443, nunca bloqueada por rede/firewall) em vez
+// de SMTP — SMTP costuma ser bloqueado por provedores de internet, VPNs e
+// firewalls corporativos, o que travava o envio (e, sem timeout, a rota
+// inteira) sempre que isso acontecia.
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 function baseHtml(title, body) {
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${title}</title></head>
@@ -31,8 +30,26 @@ function baseHtml(title, body) {
 </body></html>`;
 }
 
+// Fora de produção (ou quando o envio falha), expõe o código/link direto na
+// resposta da API — assim o fluxo continua testável sem uma caixa de e-mail.
+function withDevData(result, key, value) {
+  return result.sent || IS_PROD ? result : { ...result, [key]: value };
+}
+
+async function send({ to, subject, html }) {
+  if (!resend) return { sent: false, error: 'not_configured' };
+  try {
+    const { error } = await resend.emails.send({ from: `${APP_NAME} <${EMAIL_FROM}>`, to, subject, html });
+    if (error) throw new Error(error.message || 'Falha ao enviar e-mail.');
+    return { sent: true };
+  } catch (e) {
+    console.error('[email] erro ao enviar:', e.message);
+    return { sent: false, error: e.message };
+  }
+}
+
 export async function sendVerificationEmail({ to, code }) {
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  if (resend) {
     const html = baseHtml('Código de verificação', `
       <p style="margin:0 0 16px;color:#18181b;font-size:15px">Use o código abaixo para verificar seu email:</p>
       <div style="background:#f4f4f5;border-radius:8px;padding:20px;text-align:center;margin-bottom:16px">
@@ -40,38 +57,22 @@ export async function sendVerificationEmail({ to, code }) {
       </div>
       <p style="margin:0;color:#71717a;font-size:13px">O código expira em 15 minutos. Se não foi você, ignore este email.</p>
     `);
-    try {
-      await getTransporter().sendMail({
-        from: `${APP_NAME} <${process.env.EMAIL_USER}>`,
-        to, subject: `${code} — código de verificação ${APP_NAME}`, html
-      });
-      return { sent: true };
-    } catch (e) {
-      console.error('[email] erro ao enviar:', e.message);
-      return { sent: false, error: e.message };
-    }
+    const r = await send({ to, subject: `${code} — código de verificação ${APP_NAME}`, html });
+    return withDevData(r, 'devCode', code);
   }
   console.log(`[email] (dev) verificação ${code} para ${to}`);
   return { sent: false, devCode: code };
 }
 
 export async function sendPasswordResetEmail({ to, link }) {
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  if (resend) {
     const html = baseHtml('Redefinir senha', `
       <p style="margin:0 0 16px;color:#18181b;font-size:15px">Recebemos uma solicitação para redefinir a senha da sua conta.</p>
       <a href="${link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;margin-bottom:16px">Redefinir senha</a>
       <p style="margin:8px 0 0;color:#71717a;font-size:13px">O link expira em 1 hora. Se não foi você, ignore este email.</p>
     `);
-    try {
-      await getTransporter().sendMail({
-        from: `${APP_NAME} <${process.env.EMAIL_USER}>`,
-        to, subject: `Redefinição de senha — ${APP_NAME}`, html
-      });
-      return { sent: true };
-    } catch (e) {
-      console.error('[email] erro ao enviar:', e.message);
-      return { sent: false, error: e.message };
-    }
+    const r = await send({ to, subject: `Redefinição de senha — ${APP_NAME}`, html });
+    return withDevData(r, 'devLink', link);
   }
   console.log(`[email] (dev) reset link para ${to}: ${link}`);
   return { sent: false, devLink: link };
@@ -79,23 +80,15 @@ export async function sendPasswordResetEmail({ to, link }) {
 
 export async function sendInviteEmail({ to, name, companyName, link, role }) {
   const roleLabel = role === 'manager' ? 'gerente' : 'funcionário';
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  if (resend) {
     const html = baseHtml('Convite para o FinAnalyze', `
       <p style="margin:0 0 8px;color:#18181b;font-size:15px">Olá${name ? `, ${name}` : ''}!</p>
       <p style="margin:0 0 16px;color:#18181b;font-size:15px">Você foi convidado como <strong>${roleLabel}</strong> da empresa <strong>${companyName}</strong> no ${APP_NAME}.</p>
       <a href="${link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;margin-bottom:16px">Aceitar convite</a>
       <p style="margin:8px 0 0;color:#71717a;font-size:13px">O link expira em 48 horas.</p>
     `);
-    try {
-      await getTransporter().sendMail({
-        from: `${APP_NAME} <${process.env.EMAIL_USER}>`,
-        to, subject: `Você foi convidado para ${companyName} — ${APP_NAME}`, html
-      });
-      return { sent: true };
-    } catch (e) {
-      console.error('[email] erro ao enviar:', e.message);
-      return { sent: false, error: e.message };
-    }
+    const r = await send({ to, subject: `Você foi convidado para ${companyName} — ${APP_NAME}`, html });
+    return withDevData(r, 'devLink', link);
   }
   console.log(`[email] (dev) convite ${roleLabel} para ${to} (${companyName}): ${link}`);
   return { sent: false, devLink: link };

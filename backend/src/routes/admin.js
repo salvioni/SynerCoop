@@ -103,10 +103,4 @@ router.post('/tenants/:id/invite', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Alias para compatibilidade
-router.get('/companies', async (req, res, next) => {
-  req.url = '/tenants';
-  next('route');
-});
-
 export default router;

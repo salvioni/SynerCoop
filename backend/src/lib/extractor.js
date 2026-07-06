@@ -2,7 +2,7 @@
 
 import * as XLSX from 'xlsx';
 import pdfParse from 'pdf-parse';
-import { generateText } from './llm.js';
+import { generateText, parseJsonFromLLM } from './llm.js';
 
 const EXTRACTION_PROMPT = `Você é um especialista em contabilidade de cooperativas brasileiras.
 
@@ -116,7 +116,7 @@ function extractFromStandardExcel(wb) {
     }
   }
 
-  const year = parseInt(wb.Sheets['BP']?.['E2']?.v) || 2024;
+  const year = parseInt(wb.Sheets['BP']?.['E2']?.v) || new Date().getFullYear();
 
   const caixa = val('A.01', 'G29');
   const contas_rec_cp = val('A.02', 'G33');
@@ -268,27 +268,13 @@ ${EXTRACTION_PROMPT}`;
 
   let raw = await generateText(prompt, { maxTokens: 16000 });
 
-  // Limpar markdown e texto extra
-  if (raw.includes('```')) {
-    const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) raw = match[1];
-  }
-  raw = raw.trim();
-
-  // Encontrar o JSON no texto (pode ter texto antes/depois)
-  const jsonStart = raw.indexOf('{');
-  const jsonEnd = raw.lastIndexOf('}');
-  if (jsonStart >= 0 && jsonEnd > jsonStart) {
-    raw = raw.substring(jsonStart, jsonEnd + 1);
-  }
-
-  // Corrigir problemas comuns: trailing commas, NaN, comentários
-  raw = raw.replace(/,\s*([}\]])/g, '$1');
-  raw = raw.replace(/:\s*NaN/g, ': 0');
+  // Modelos às vezes colam um comentário `//` dentro do JSON (fora da spec).
+  // Removido aqui, antes do parser comum (parseJsonFromLLM cobre markdown,
+  // texto antes/depois, vírgulas sobrando e NaN).
   raw = raw.replace(/\/\/.*/g, '');
 
   try {
-    return JSON.parse(raw);
+    return parseJsonFromLLM(raw);
   } catch (e) {
     console.error('[extractor] JSON inválido da IA. Primeiros 500 chars:', raw.substring(0, 500));
     throw new Error('A IA retornou dados em formato inválido. Tente novamente.');

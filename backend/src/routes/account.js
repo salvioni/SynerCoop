@@ -2,15 +2,16 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import { db } from '../lib/db.js';
-import { authRequired } from '../middleware/auth.js';
+import { authRequired, managerOnly, planExempt } from '../middleware/auth.js';
 import { badRequest, trim } from '../lib/validate.js';
 import { audit, ACTIONS } from '../lib/audit.js';
+import { startOfMonthISO } from '../lib/date.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
 
 const router = Router();
 
-router.get('/', authRequired, async (req, res, next) => {
+router.get('/', planExempt, authRequired, async (req, res, next) => {
   try {
     const tenant = await db.prepare('SELECT name, plan FROM tenants WHERE id = ?').get(req.user.tenant_id);
     const clientCount = await db.prepare('SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ? AND active = 1').get(req.user.tenant_id);
@@ -22,16 +23,32 @@ router.get('/', authRequired, async (req, res, next) => {
     const monthlyCount = await db.prepare(`
       SELECT COUNT(*) AS cnt FROM analyses a
       JOIN clients c ON c.id = a.client_id
-      WHERE c.tenant_id = ?
-        AND a.created_at >= date('now', 'start of month')
-    `).get(req.user.tenant_id);
+      WHERE c.tenant_id = ? AND a.created_at >= ?
+    `).get(req.user.tenant_id, startOfMonthISO());
     res.json({
       companyName: tenant?.name || '',
-      plan: tenant?.plan || 'trial',
+      // null (não 'trial') enquanto o tenant ainda não escolheu um plano —
+      // esta rota é acessível antes da escolha (ver PLAN_EXEMPT_ROUTES em
+      // middleware/auth.js), então mentir aqui esconderia esse estado.
+      plan: tenant?.plan || null,
       activeClients: clientCount?.cnt || 0,
       totalAnalyses: analysisCount?.cnt || 0,
       monthlyAnalyses: monthlyCount?.cnt || 0,
     });
+  } catch (e) { next(e); }
+});
+
+// POST /account/select-plan — única forma de entrar no plano trial sem
+// passar pelo checkout do Stripe. Planos pagos são definidos pelo webhook
+// do Stripe (ver routes/stripe.js) após a assinatura ser confirmada.
+router.post('/select-plan', planExempt, authRequired, managerOnly, async (req, res, next) => {
+  try {
+    if (req.body?.plan !== 'trial') throw badRequest('Plano inválido.');
+    if (req.user.plan) throw badRequest('Este escritório já tem um plano ativo.');
+
+    await db.prepare(`UPDATE tenants SET plan = 'trial', onboarded_at = CURRENT_TIMESTAMP WHERE id = ?`).run(req.user.tenant_id);
+    await audit(req, ACTIONS.PLAN_SELECTED, { targetType: 'tenant', targetId: req.user.tenant_id, meta: { plan: 'trial' } });
+    res.json({ ok: true, plan: 'trial' });
   } catch (e) { next(e); }
 });
 
@@ -66,7 +83,7 @@ router.post('/avatar', authRequired, upload.single('file'), async (req, res, nex
 router.patch('/avatar-color', authRequired, async (req, res, next) => {
   try {
     const color = req.body?.color;
-    if (!color) throw badRequest('Cor obrigatória.');
+    if (!color || !/^#[0-9A-Fa-f]{6}$/.test(color)) throw badRequest('Cor inválida.');
     await db.prepare('UPDATE users SET avatar_color = ?, avatar = NULL WHERE id = ?').run(color, req.user.id);
     res.json({ ok: true });
   } catch (e) { next(e); }

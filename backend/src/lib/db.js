@@ -80,7 +80,11 @@ if (USE_PG) {
   const path = (await import('node:path')).default;
   const { fileURLToPath } = await import('node:url');
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const DB_PATH = path.resolve(__dirname, '../../data.db');
+  // Testes usam um banco em memória, isolado do data.db de desenvolvimento —
+  // sem isso, cada `npm test` gravava tenants/usuários de teste no arquivo real.
+  const DB_PATH = process.env.NODE_ENV === 'test'
+    ? ':memory:'
+    : path.resolve(__dirname, '../../data.db');
   const sqlite = new BetterSqlite3(DB_PATH);
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
@@ -217,7 +221,9 @@ export async function initDb() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_analyses_client ON analyses(client_id);
+    CREATE INDEX IF NOT EXISTS idx_analyses_created_at ON analyses(created_at);
     CREATE INDEX IF NOT EXISTS idx_clients_tenant ON clients(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_clients_tenant_active ON clients(tenant_id, active);
     CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_email_verifs_user ON email_verifications(user_id);
     CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token);
@@ -237,9 +243,29 @@ export async function initDb() {
     `ALTER TABLE analyses ADD COLUMN created_by TEXT`,
     `ALTER TABLE users ADD COLUMN avatar TEXT`,
     `ALTER TABLE users ADD COLUMN avatar_color TEXT`,
+    `ALTER TABLE clients ADD COLUMN logo TEXT`,
+    `ALTER TABLE clients ADD COLUMN logo_color TEXT`,
+    `ALTER TABLE users ADD COLUMN google_id TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)`,
+    `ALTER TABLE users ADD COLUMN facebook_id TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_facebook_id ON users(facebook_id)`,
+    `ALTER TABLE tenants ADD COLUMN type TEXT DEFAULT 'empresa'`,
+    `ALTER TABLE tenants ADD COLUMN sector TEXT`,
+    `ALTER TABLE tenants ADD COLUMN self_client_id TEXT`,
+    // Marca a conclusão da escolha de plano (trial ou checkout do Stripe),
+    // uma única vez, para sempre — diferente de `plan`, que fica NULL de
+    // novo se a assinatura for cancelada. Sem essa distinção, um tenant
+    // pagante cuja assinatura expira ficaria indistinguível de um cadastro
+    // nunca finalizado (ver POST /auth/register).
+    `ALTER TABLE tenants ADD COLUMN onboarded_at TIMESTAMP`,
   ]) {
     try { await db.exec(sql); } catch { /* já aplicado ou não suportado pelo driver */ }
   }
 
-  console.log(`[db] schema OK (driver: ${driverName})`);
+  // Limpar tokens expirados a cada inicialização
+  await db.exec(`DELETE FROM email_verifications WHERE expires_at < CURRENT_TIMESTAMP`);
+  await db.exec(`DELETE FROM password_resets WHERE expires_at < CURRENT_TIMESTAMP`);
+  await db.exec(`DELETE FROM invites WHERE expires_at < CURRENT_TIMESTAMP AND used_at IS NULL`);
+
+  (await import('./logger.js')).default.info({ driver: driverName }, 'DB schema OK');
 }

@@ -1,13 +1,9 @@
-import { useEffect, useId } from 'react';
+import { useId } from 'react';
+import { useEscapeKey } from '../lib/useEscapeKey.js';
 
 export default function Modal({ title, onClose, children, footer }) {
   const titleId = useId();
-
-  useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') onClose?.(); }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   return (
     <div className="overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>

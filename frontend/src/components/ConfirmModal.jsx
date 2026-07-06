@@ -1,11 +1,7 @@
-import { useEffect } from 'react';
+import { useEscapeKey } from '../lib/useEscapeKey.js';
 
 export default function ConfirmModal({ title, message, warning, confirmLabel = 'Confirmar', danger = false, onConfirm, onClose }) {
-  useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') onClose?.(); }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   return (
     <div className="overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>

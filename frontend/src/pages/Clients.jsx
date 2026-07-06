@@ -1,13 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../lib/api.js';
 import ConfirmModal from '../components/ConfirmModal.jsx';
-
-const TYPES = ['cooperativa', 'empresa', 'associacao', 'outro'];
-
-function initials(name) {
-  return name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-}
+import { AVATAR_COLORS, initials } from '../components/UserAvatar.jsx';
+import PageHeader from '../components/PageHeader.jsx';
+import { CLIENT_TYPES } from '../lib/constants.js';
 
 export default function Clients() {
   const navigate = useNavigate();
@@ -16,14 +13,15 @@ export default function Clients() {
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState(null);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ name: '', cnpj: '', type: 'cooperativa', contact_email: '', contact_phone: '', notes: '' });
+  const [form, setForm] = useState({ name: '', cnpj: '', type: CLIENT_TYPES[0], contact_email: '', contact_phone: '', notes: '', logo: null, logo_color: null });
   const [errs, setErrs] = useState({});
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const logoRef = useRef(null);
 
   async function load() {
     setLoading(true);
-    try { const r = await api.get('/clients'); setClients(r.clients || []); }
+    try { const r = await api.get('/clients?active=1'); setClients(r.clients || []); }
     finally { setLoading(false); }
   }
 
@@ -34,14 +32,27 @@ export default function Clients() {
   );
 
   function openNew() {
-    setForm({ name: '', cnpj: '', type: 'cooperativa', contact_email: '', contact_phone: '', notes: '' });
+    setForm({ name: '', cnpj: '', type: CLIENT_TYPES[0], contact_email: '', contact_phone: '', notes: '', logo: null, logo_color: null });
     setErrs({}); setErr(''); setModal('new');
   }
 
   function openEdit(c, e) {
     e.stopPropagation();
-    setForm({ name: c.name, cnpj: c.cnpj || '', type: c.type || 'cooperativa', contact_email: c.contact_email || '', contact_phone: c.contact_phone || '', notes: c.notes || '' });
+    setForm({ name: c.name, cnpj: c.cnpj || '', type: c.type || 'cooperativa', contact_email: c.contact_email || '', contact_phone: c.contact_phone || '', notes: c.notes || '', logo: c.logo || null, logo_color: c.logo_color || null });
     setErrs({}); setErr(''); setModal({ client: c });
+  }
+
+  function pickLogo(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setForm(p => ({ ...p, logo: ev.target.result, logo_color: null }));
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  function pickColor(color) {
+    setForm(p => ({ ...p, logo_color: color, logo: null }));
   }
 
   function upd(k, v) { setForm(p => ({ ...p, [k]: v })); setErrs(p => ({ ...p, [k]: '' })); setErr(''); }
@@ -68,15 +79,11 @@ export default function Clients() {
   return (
     <>
       <div className="page-body">
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 32 }}>
-          <div>
-            <div style={{ fontSize: 14, color: 'var(--t2)' }}>Empresas analisadas</div>
-            <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 4, color: 'var(--t0)' }}>Clientes</h1>
-          </div>
-          <button className="btn btn-p" onClick={openNew}>
-            <i className="ti ti-plus"></i> Adicionar cliente
-          </button>
-        </div>
+        <PageHeader
+          subtitle="Empresas analisadas"
+          title="Clientes"
+          action={<button className="btn btn-p" onClick={openNew}><i className="ti ti-plus"></i> Adicionar cliente</button>}
+        />
 
         <div className="cl-search" style={{ marginBottom: 24, maxWidth: 480, width: '100%' }}>
           <i className="ti ti-search"></i>
@@ -96,16 +103,13 @@ export default function Clients() {
             {filtered.map(c => (
               <div key={c.id} className="cl-card" onClick={() => navigate(`/app/clients/${c.id}`)}>
                 <div className="cl-card-head">
-                  <div className="cl-card-av">{initials(c.name)}</div>
+                  <div className="cl-card-av" style={c.logo ? { backgroundImage: `url(${c.logo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : c.logo_color ? { background: c.logo_color } : {}}>
+                    {!c.logo && initials(c.name)}
+                  </div>
                   <span className="cl-card-type">{c.type || 'empresa'}</span>
                 </div>
                 <div className="cl-card-name">{c.name}</div>
-                {c.cnpj && <div className="cl-card-cnpj">{c.cnpj}</div>}
-                <div className="cl-card-sep"></div>
-                <div className="cl-card-foot">
-                  <span>{c.analysis_count || 0} análises</span>
-                  <span>{c.last_analysis_at ? `Última: ${new Date(c.last_analysis_at).toLocaleDateString('pt-BR')}` : ''}</span>
-                </div>
+                <div className="cl-card-cnpj">{c.cnpj || ''}</div>
               </div>
             ))}
           </div>
@@ -121,6 +125,30 @@ export default function Clients() {
             </div>
             <div className="modal-body">
               {err && <div className="err-banner">{err}</div>}
+              <div className="inp-wrap" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div className="cl-logo-pick" onClick={() => logoRef.current?.click()}>
+                  <div className="cl-card-av" style={{ width: 56, height: 56, borderRadius: 14, fontSize: 18, ...(form.logo ? { backgroundImage: `url(${form.logo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : form.logo_color ? { background: form.logo_color } : {}) }}>
+                    {!form.logo && initials(form.name)}
+                  </div>
+                  <div className="cl-logo-pick-ov" style={{ borderRadius: 14 }}>
+                    <i className="ti ti-camera" style={{ fontSize: 18, color: '#fff' }}></i>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t0)', marginBottom: 8 }}>Logo do cliente <span style={{ color: 'var(--t3)', fontWeight: 400 }}>(opcional)</span></div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                    {AVATAR_COLORS.map(c => (
+                      <button key={c.value} type="button" title={c.label} onClick={() => pickColor(c.value)} style={{ width: 22, height: 22, borderRadius: '50%', background: c.value, border: form.logo_color === c.value ? '2px solid var(--gold)' : '2px solid transparent', cursor: 'pointer', padding: 0 }} />
+                    ))}
+                  </div>
+                  {(form.logo || form.logo_color) && (
+                    <button type="button" style={{ background: 'none', border: 'none', padding: 0, fontSize: 12, color: 'var(--red-t)', cursor: 'pointer' }} onClick={() => setForm(p => ({ ...p, logo: null, logo_color: null }))}>
+                      Remover
+                    </button>
+                  )}
+                </div>
+                <input ref={logoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={pickLogo} />
+              </div>
               <div className="inp-wrap">
                 <label className="inp-label">Nome *</label>
                 <input className={`inp${errs.name ? ' inp-err' : ''}`} placeholder="Nome da empresa" value={form.name} onChange={e => upd('name', e.target.value)} autoFocus />
@@ -129,7 +157,7 @@ export default function Clients() {
               <div className="inp-wrap">
                 <label className="inp-label">Tipo</label>
                 <select className="inp" value={form.type} onChange={e => upd('type', e.target.value)}>
-                  {TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+                  {CLIENT_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
                 </select>
               </div>
               <div className="inp-wrap">

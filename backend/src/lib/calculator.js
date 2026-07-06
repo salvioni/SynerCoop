@@ -1,12 +1,8 @@
 // Port direto do calculator.py — mesmas fórmulas, mesma estrutura.
 
 function safeDiv(a, b, def = 0) {
-  try {
-    if (b === 0) return def;
-    return Math.round((a / b) * 10000) / 10000;
-  } catch {
-    return def;
-  }
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return def;
+  return Math.round((a / b) * 10000) / 10000;
 }
 
 export function calculateIndicators(data) {
@@ -130,7 +126,6 @@ export function calculateIndicators(data) {
       liquidez_seca,
       garantia_capital_terceiros: garantia_cap_terceiros,
       imobilizacao_recursos_proprios: imob_rec_proprios,
-      imobilizacao_recursos_proprios_pct: imob_rec_proprios,
       ebitda,
       inadimplencia_total_pct: inadimplencia,
     },

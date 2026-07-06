@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import { MIN_PASSWORD_LENGTH } from '../lib/constants.js';
 
 export default function AcceptInvite() {
   const [params] = useSearchParams();
@@ -33,7 +34,7 @@ export default function AcceptInvite() {
     e.preventDefault();
     const fe = {};
     if (!pass) fe.pass = 'Informe a senha.';
-    else if (pass.length < 6) fe.pass = 'Mínimo 6 caracteres.';
+    else if (pass.length < MIN_PASSWORD_LENGTH) fe.pass = `Mínimo ${MIN_PASSWORD_LENGTH} caracteres.`;
     if (!pass2) fe.pass2 = 'Confirme a senha.';
     else if (pass !== pass2) fe.pass2 = 'As senhas não coincidem.';
     if (Object.keys(fe).length) { setErrs(fe); return; }
@@ -106,7 +107,7 @@ export default function AcceptInvite() {
           </div>
           <div className="inp-wrap">
             <label className="inp-label">Criar senha</label>
-            <input className={`inp${errs.pass ? ' inp-err' : ''}`} type="password" placeholder="Mínimo 6 caracteres"
+            <input className={`inp${errs.pass ? ' inp-err' : ''}`} type="password" placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
               value={pass} onChange={e => { setPass(e.target.value); setErrs(p => ({ ...p, pass: '' })); }} autoFocus />
             {errs.pass && <div className="inp-hint">{errs.pass}</div>}
           </div>

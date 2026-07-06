@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { api } from '../lib/api.js';
+import { initials } from '../components/UserAvatar.jsx';
 
 const THEMES = [
   {
@@ -64,9 +65,6 @@ const THEMES = [
   },
 ];
 
-function initials(name) {
-  return name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-}
 
 export default function Account() {
   const { user } = useAuth();

@@ -4,7 +4,7 @@ import { authRequired } from '../middleware/auth.js';
 import { badRequest } from '../lib/validate.js';
 import { audit, ACTIONS } from '../lib/audit.js';
 import { generateReport } from '../lib/report.js';
-import { generateText } from '../lib/llm.js';
+import { generateAnalysisNarrative } from '../lib/narrative.js';
 
 const router = Router();
 router.use(authRequired);
@@ -89,46 +89,20 @@ router.get('/:id/report', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+function parseJsonField(v) {
+  if (!v) return null;
+  return typeof v === 'string' ? JSON.parse(v) : v;
+}
+
 function _parseAnalysis(a) {
   return {
     ...a,
-    bp: a.bp ? (typeof a.bp === 'string' ? JSON.parse(a.bp) : a.bp) : null,
-    dsp: a.dsp ? (typeof a.dsp === 'string' ? JSON.parse(a.dsp) : a.dsp) : null,
-    indicators: a.indicators ? (typeof a.indicators === 'string' ? JSON.parse(a.indicators) : a.indicators) : null,
-    narrative: a.narrative ? (typeof a.narrative === 'string' ? JSON.parse(a.narrative) : a.narrative) : null,
+    bp: parseJsonField(a.bp),
+    dsp: parseJsonField(a.dsp),
+    indicators: parseJsonField(a.indicators),
+    narrative: parseJsonField(a.narrative),
   };
 }
-
-const NARRATIVE_PROMPT = `Você é um analista financeiro especializado em cooperativas brasileiras.
-Com base nos indicadores financeiros abaixo, gere um relatório de análise detalhado e profissional.
-
-Empresa: {company_name}
-Tipo: {company_type}
-Exercício: {year}
-
-INDICADORES: {indicators_json}
-BALANÇO PATRIMONIAL: {bp_json}
-DSP: {dsp_json}
-
-Retorne SOMENTE um JSON válido (sem texto antes ou depois) com esta estrutura:
-{
-  "sumario": "Parágrafo de 3-5 frases resumindo a situação financeira geral.",
-  "liquidez": "Parágrafo analisando liquidez corrente, geral, seca e imobilização. Cite os valores exatos.",
-  "rentabilidade": "Parágrafo analisando ROE, ROA, margem e EBITDA. Cite valores.",
-  "endividamento": "Parágrafo analisando endividamento total, perfil, alavancagem. Cite valores.",
-  "capacidade_operacional": "Parágrafo analisando PMR, PME, PMP, ciclo financeiro, giro. Cite valores.",
-  "tesouraria": "Parágrafo analisando capital de giro, NCG, tesouraria, independência. Cite valores.",
-  "forcas": "1-2 frases sobre pontos fortes.",
-  "fraquezas": "1-2 frases sobre pontos de atenção.",
-  "riscos": "1-2 frases sobre riscos identificados.",
-  "recomendacoes": ["Recomendação 1: descrição.", "Recomendação 2: descrição.", "Recomendação 3: descrição.", "Recomendação 4: descrição."]
-}
-
-Regras:
-- Linguagem profissional mas acessível para contadores e diretores
-- Cooperativas usam "sobras/perdas" em vez de "lucro/prejuízo"
-- Cite valores exatos dos indicadores
-- Recomendações práticas e acionáveis`;
 
 // POST /analyses/:id/narrative
 router.post('/:id/narrative', async (req, res, next) => {
@@ -144,26 +118,14 @@ router.post('/:id/narrative', async (req, res, next) => {
     }
 
     const parsed = _parseAnalysis(analysis);
-    const prompt = NARRATIVE_PROMPT
-      .replace('{company_name}', analysis.client_name)
-      .replace('{company_type}', analysis.company_type || 'cooperativa')
-      .replace('{year}', analysis.year)
-      .replace('{indicators_json}', JSON.stringify(parsed.indicators, null, 2))
-      .replace('{bp_json}', JSON.stringify(parsed.bp, null, 2))
-      .replace('{dsp_json}', JSON.stringify(parsed.dsp, null, 2));
-
-    let raw = await generateText(prompt, { maxTokens: 8000 });
-
-    if (raw.includes('```')) {
-      const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (match) raw = match[1];
-    }
-    raw = raw.trim();
-    const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-    if (s >= 0 && e > s) raw = raw.substring(s, e + 1);
-    raw = raw.replace(/,\s*([}\]])/g, '$1');
-
-    const narrative = JSON.parse(raw);
+    const narrative = await generateAnalysisNarrative({
+      companyName: analysis.client_name,
+      companyType: analysis.company_type,
+      year: analysis.year,
+      indicators: parsed.indicators,
+      bp: parsed.bp,
+      dsp: parsed.dsp,
+    });
     await db.prepare('UPDATE analyses SET narrative = ? WHERE id = ?').run(JSON.stringify(narrative), req.params.id);
     res.json({ narrative });
   } catch (e) { next(e); }

@@ -12,6 +12,20 @@ export function setToken(t) {
   else localStorage.removeItem('finanalyze_token');
 }
 
+// Lança ApiError se a resposta não for 2xx. Único lugar que interpreta o
+// corpo de erro da API — usado por apiCall, uploadFile e downloadFile para
+// as três nunca tratarem uma falha de forma diferente uma da outra.
+function throwIfError(res, data) {
+  if (res.ok) return;
+  // Plano foi revogado no meio da sessão (ex.: assinatura cancelada pelo
+  // Stripe) — manda de volta pra seleção de plano em vez de deixar toda
+  // chamada seguinte quebrar com um erro genérico de 402.
+  if (res.status === 402 && data?.fields?.code === 'PLAN_REQUIRED' && location.pathname !== '/select-plan') {
+    location.assign('/select-plan');
+  }
+  throw new ApiError(res.status, data?.error || `Erro ${res.status}`, data?.fields || null, null, data);
+}
+
 export async function apiCall(method, path, body) {
   const headers = { 'Content-Type': 'application/json' };
   const token = getToken();
@@ -31,9 +45,7 @@ export async function apiCall(method, path, body) {
   let data = null;
   try { data = await res.json(); } catch { /* sem corpo */ }
 
-  if (!res.ok) {
-    throw new ApiError(res.status, data?.error || `Erro ${res.status}`, data?.fields || null, null, data);
-  }
+  throwIfError(res, data);
   return data;
 }
 
@@ -64,9 +76,7 @@ export async function uploadFile(path, file, extra = {}) {
   let data = null;
   try { data = await res.json(); } catch { /* sem corpo */ }
 
-  if (!res.ok) {
-    throw new ApiError(res.status, data?.error || `Erro ${res.status}`, data?.fields || null, null, data);
-  }
+  throwIfError(res, data);
   return data;
 }
 
@@ -89,7 +99,7 @@ export async function downloadFile(path) {
   if (!res.ok) {
     let data = null;
     try { data = await res.json(); } catch { /* noop */ }
-    throw new ApiError(res.status, data?.error || `Erro ${res.status}`, null, null, data);
+    throwIfError(res, data);
   }
 
   return res.blob();

@@ -29,6 +29,10 @@ export function forbidden(message = 'Acesso negado.') {
   return new HttpError(403, message);
 }
 
+export function paymentRequired(message = 'Escolha um plano para continuar.') {
+  return new HttpError(402, message, { code: 'PLAN_REQUIRED' });
+}
+
 export function notFound(message = 'Não encontrado.') {
   return new HttpError(404, message);
 }

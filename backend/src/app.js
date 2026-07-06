@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import logger from './lib/logger.js';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/account.js';
 import usersRoutes from './routes/users.js';
@@ -21,6 +22,11 @@ export function createApp() {
   app.use(express.json({ limit: '50mb' }));
   app.use(rateLimit({ windowMs: 60_000, max: 1000, standardHeaders: true, legacyHeaders: false }));
 
+  app.use((req, _res, next) => {
+    logger.info({ method: req.method, path: req.path }, 'request');
+    next();
+  });
+
   app.get('/', (_req, res) => res.json({ ok: true, app: 'SynerCoop API' }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -38,8 +44,9 @@ export function createApp() {
     if (err.message?.includes('Formato não suportado') || err.message?.includes('File too large') || err.message?.includes('Limite de requisições') || err.message?.includes('Tipo de arquivo')) {
       return res.status(400).json({ error: err.message });
     }
-    console.error('[ERRO 500]', err.message, err.stack?.split('\n').slice(0,3).join(' '));
-    res.status(500).json({ error: err.message || 'Erro interno do servidor.' });
+    logger.error({ err: err.message, stack: err.stack?.split('\n').slice(0, 3) }, 'Erro 500');
+    const IS_PROD = process.env.NODE_ENV === 'production';
+    res.status(500).json({ error: IS_PROD ? 'Erro interno do servidor.' : (err.message || 'Erro interno do servidor.') });
   });
 
   return app;

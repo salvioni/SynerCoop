@@ -27,7 +27,7 @@ router.post('/invite', authRequired, managerOnly, async (req, res, next) => {
   try {
     const name = trim(req.body?.name);
     const email = trim(req.body?.email)?.toLowerCase();
-    const role = req.body?.role === 'manager' ? 'manager' : 'manager'; // só manager no finanalyze
+    const role = 'manager';
 
     if (!name) throw badRequest('Nome é obrigatório.', { name: 'Informe o nome.' });
     if (!email || !isValidEmail(email)) throw badRequest('E-mail inválido.', { email: 'Informe um e-mail válido.' });
@@ -38,7 +38,7 @@ router.post('/invite', authRequired, managerOnly, async (req, res, next) => {
     const tenant = await db.prepare('SELECT name FROM tenants WHERE id = ?').get(req.user.tenant_id);
 
     const userId = nanoid(10);
-    const dummyHash = await bcrypt.hash(nanoid(32), 10);
+    const dummyHash = await bcrypt.hash(nanoid(32), 12);
     await db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified)
                       VALUES (?, ?, ?, ?, ?, ?, 1)`)
       .run(userId, req.user.tenant_id, name, email, dummyHash, role);
@@ -52,7 +52,8 @@ router.post('/invite', authRequired, managerOnly, async (req, res, next) => {
     const link = `${baseUrl}/accept-invite?token=${token}`;
     const emailRes = await sendInviteEmail({ to: email, name, companyName: tenant?.name, link, role });
     await audit(req, ACTIONS.USER_INVITED, { targetType: 'user', targetId: userId, targetLabel: name, meta: { email, role } });
-    res.json({ ok: true, devLink: emailRes.devLink });
+    const IS_PROD = process.env.NODE_ENV === 'production';
+    res.json({ ok: true, ...(IS_PROD ? {} : { devLink: emailRes.devLink }) });
   } catch (e) { next(e); }
 });
 

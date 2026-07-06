@@ -21,17 +21,16 @@ function getClaude() {
   return claudeClient;
 }
 
+const GEMINI_MODEL = 'gemini-2.5-flash';
+
 function getGemini() {
   if (!geminiModel) {
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
-    const models = ['gemini-2.5-flash', 'gemini-2.0-flash-lite', 'gemini-2.0-flash'];
-    for (const m of models) {
-      try {
-        geminiModel = genAI.getGenerativeModel({ model: m });
-        console.log(`[llm] Usando modelo: ${m}`);
-        break;
-      } catch { continue; }
-    }
+    // genAI.getGenerativeModel() só monta o cliente localmente — nunca valida
+    // o nome do modelo contra a API, então um try/catch aqui nunca captura
+    // nada (um modelo inválido só falha depois, em generateContent()).
+    geminiModel = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    console.log(`[llm] Usando modelo: ${GEMINI_MODEL}`);
   }
   return geminiModel;
 }
@@ -80,4 +79,22 @@ export async function generateText(prompt, { maxTokens = 4000, retries = 2 } = {
 
 export function getProviderName() {
   return getProvider() || 'none';
+}
+
+// Extrai e faz o parse do JSON de uma resposta de LLM — cobre os problemas
+// mais comuns: texto antes/depois do JSON, cercas de código markdown,
+// vírgulas sobrando antes de `}`/`]` e o literal NaN (inválido em JSON).
+export function parseJsonFromLLM(raw) {
+  let text = raw;
+  if (text.includes('```')) {
+    const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (match) text = match[1];
+  }
+  text = text.trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) text = text.substring(start, end + 1);
+  text = text.replace(/,\s*([}\]])/g, '$1');
+  text = text.replace(/:\s*NaN/g, ': 0');
+  return JSON.parse(text);
 }

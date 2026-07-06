@@ -1,4 +1,4 @@
-function initials(name) {
+export function initials(name) {
   return (name || '').split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 }
 

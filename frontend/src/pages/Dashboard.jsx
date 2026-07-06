@@ -4,6 +4,8 @@ import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import { getPlan } from '../lib/plans.js';
 import UserAvatar from '../components/UserAvatar.jsx';
+import PageHeader from '../components/PageHeader.jsx';
+import ClientDashboard from '../components/ClientDashboard.jsx';
 
 function greeting() {
   const h = new Date().getHours();
@@ -12,22 +14,25 @@ function greeting() {
   return 'Boa noite';
 }
 
-function initials(name) {
-  return name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-}
-
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, isSingleEntity } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [analyses, setAnalyses] = useState([]);
   const [users, setUsers] = useState([]);
 
   useEffect(() => {
+    if (isSingleEntity) return;
     api.get('/stats').then(setStats).catch(() => {});
     api.get('/analyses?limit=5').then(r => setAnalyses(r.analyses || [])).catch(() => {});
-    api.get('/users').then(r => setUsers(r.users || [])).catch(() => {});
-  }, []);
+    // Convites ainda não aceitos não contam como membro ativo do escritório.
+    api.get('/users').then(r => setUsers((r.users || []).filter(u => !u.invite_pending))).catch(() => {});
+  }, [isSingleEntity]);
+
+  // Contas de entidade única (cooperativa/empresa/associação/outro) não têm
+  // uma carteira de clientes — a "Visão geral" é direto o painel do cliente
+  // espelhado na conta.
+  if (isSingleEntity) return <ClientDashboard clientId={user.self_client_id} allowDelete={false} />;
 
   const firstName = user?.name?.split(' ')[0] || '';
   const plan = getPlan(stats?.plan || user?.plan);
@@ -37,17 +42,13 @@ export default function Dashboard() {
 
   return (
     <div className="page-body">
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ fontSize: 14, color: 'var(--t2)' }}>{greeting()}, {firstName}</div>
-        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 4, color: 'var(--t0)' }}>Visão geral</h1>
-      </div>
+      <PageHeader subtitle={`${greeting()}, ${firstName}`} title="Visão geral" />
 
       <div className="dash-grid">
         {[
           { label: 'Análises este mês', val: monthly, sub: `de ${limitLabel} no plano ${plan.label}`, icon: 'ti-chart-bar' },
           { label: 'Clientes ativos', val: stats?.activeClients ?? '—', sub: stats?.newClientsMonth ? `+${stats.newClientsMonth} este mês` : '', icon: 'ti-users' },
           { label: 'Relatórios gerados', val: stats?.totalAnalyses ?? '—', sub: 'últimos 30 dias', icon: 'ti-file-text' },
-          { label: 'Tempo médio', val: '1m 23s', sub: 'do upload ao relatório', icon: 'ti-clock' },
         ].map(({ label, val, sub, icon }) => (
           <div key={label} className="dash-card">
             <div className="dash-card-head">
@@ -86,7 +87,7 @@ export default function Dashboard() {
         </div>
 
         <div className="dash-section">
-          <div className="dash-section-head">
+          <div className="dash-section-head" style={{ marginBottom: 28 }}>
             <span className="dash-section-title">Resumo do escritório</span>
           </div>
           <div style={{ marginBottom: 20 }}>
@@ -97,7 +98,7 @@ export default function Dashboard() {
             </div>
             <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 8 }}>{monthly} de {limitLabel} análises usadas</div>
           </div>
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 20, marginTop: 32 }}>
             <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--t2)', fontWeight: 500, marginBottom: 10 }}>Membros</div>
             <div style={{ display: 'flex' }}>
               {(users.length ? users : [{ id: 'me', name: user?.name || 'Eu', avatar: user?.avatar, avatar_color: user?.avatar_color }]).slice(0, 4).map((u, i) => (

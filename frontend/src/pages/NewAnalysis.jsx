@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, uploadFile, ApiError } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 
 const STEPS = [
   { n: 1, label: 'Cliente' },
   { n: 2, label: 'Upload' },
   { n: 3, label: 'Processamento' },
 ];
+const STEPS_SINGLE_ENTITY = STEPS.filter(s => s.n !== 1);
 
 export default function NewAnalysis() {
   const navigate = useNavigate();
-  const [step, setStep] = useState(1);
+  const { user, isSingleEntity } = useAuth();
+  const [step, setStep] = useState(isSingleEntity ? 2 : 1);
 
   const [clients, setClients] = useState([]);
-  const [clientId, setClientId] = useState('');
+  const [clientId, setClientId] = useState(isSingleEntity ? user.self_client_id : '');
   const [search, setSearch] = useState('');
   const [loadingClients, setLoadingClients] = useState(true);
 
@@ -24,10 +27,11 @@ export default function NewAnalysis() {
   const fileRef = useRef(null);
 
   useEffect(() => {
-    api.get('/clients').then(r => setClients(r.clients || []))
-      .catch(() => {})
-      .finally(() => setLoadingClients(false));
-  }, []);
+    const req = isSingleEntity
+      ? api.get(`/clients/${user.self_client_id}`).then(r => [r.client])
+      : api.get('/clients?active=1').then(r => r.clients || []);
+    req.then(setClients).catch(() => {}).finally(() => setLoadingClients(false));
+  }, [isSingleEntity]);
 
   const filtered = clients.filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.cnpj || '').includes(search)
@@ -83,7 +87,7 @@ export default function NewAnalysis() {
 
       {/* Stepper */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 40 }}>
-        {STEPS.map((s, i) => (
+        {(isSingleEntity ? STEPS_SINGLE_ENTITY : STEPS).map((s, i, arr) => (
           <div key={s.n} style={{ display: 'contents' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{
@@ -99,7 +103,7 @@ export default function NewAnalysis() {
                 {s.label}
               </span>
             </div>
-            {i < STEPS.length - 1 && (
+            {i < arr.length - 1 && (
               <div style={{ flex: 1, height: 1, margin: '0 16px', background: step > s.n ? 'var(--blue)' : 'var(--bd)' }}></div>
             )}
           </div>
@@ -159,9 +163,11 @@ export default function NewAnalysis() {
           <div style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
             <i className="ti ti-building" style={{ fontSize: 16 }}></i>
             <span style={{ fontWeight: 500, color: 'var(--t0)' }}>{selectedClient?.name}</span>
-            <button onClick={() => setStep(1)} style={{ background: 'none', border: 'none', color: 'var(--t2)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
-              trocar
-            </button>
+            {!isSingleEntity && (
+              <button onClick={() => setStep(1)} style={{ background: 'none', border: 'none', color: 'var(--t2)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
+                trocar
+              </button>
+            )}
           </div>
 
           <div

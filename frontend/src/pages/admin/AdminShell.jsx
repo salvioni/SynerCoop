@@ -1,9 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.jsx';
-
-function initials(name) {
-  return name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-}
+import UserAvatar from '../../components/UserAvatar.jsx';
 
 export default function AdminShell() {
   const { user, logout } = useAuth();
@@ -29,7 +26,7 @@ export default function AdminShell() {
         </nav>
         <div className="s-foot">
           <div className="s-user">
-            <div className="s-av">{initials(user.name)}</div>
+            <UserAvatar user={user} size={36} />
             <span className="s-uname">{user.name}</span>
             <button className="s-logout" onClick={doLogout} title="Sair">
               <i className="ti ti-logout" aria-hidden="true"></i>

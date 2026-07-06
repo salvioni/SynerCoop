@@ -7,7 +7,7 @@ import { db } from '../lib/db.js';
 import { signToken } from '../lib/jwt.js';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../lib/email.js';
 import { isValidEmail, trim, badRequest, unauthorized } from '../lib/validate.js';
-import { authRequired } from '../middleware/auth.js';
+import { authRequired, planExempt } from '../middleware/auth.js';
 
 function timingSafeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -25,7 +25,8 @@ const loginLimit = rateLimit({
 const registerLimit = rateLimit({
   windowMs: 60_000, max: 3,
   message: { error: 'Muitas tentativas de cadastro. Aguarde 1 minuto.' },
-  standardHeaders: true, legacyHeaders: false
+  standardHeaders: true, legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test'
 });
 const verifyLimit = rateLimit({
   windowMs: 60_000, max: 10,
@@ -37,13 +38,136 @@ const forgotLimit = rateLimit({
   message: { error: 'Muitas solicitações. Aguarde 1 minuto.' },
   standardHeaders: true, legacyHeaders: false
 });
+const googleLimit = rateLimit({
+  windowMs: 60_000, max: 10,
+  message: { error: 'Muitas tentativas. Aguarde 1 minuto.' },
+  standardHeaders: true, legacyHeaders: false
+});
+const facebookLimit = rateLimit({
+  windowMs: 60_000, max: 10,
+  message: { error: 'Muitas tentativas. Aguarde 1 minuto.' },
+  standardHeaders: true, legacyHeaders: false
+});
+
+const TENANT_TYPES = ['cooperativa', 'escritorio', 'empresa', 'associacao', 'outro'];
+
+// Ramos de atuação (baseado na classificação da OCB), usado para segmentar
+// o tipo de negócio do escritório/cooperativa que está se cadastrando.
+const BUSINESS_SECTORS = [
+  'agropecuario', 'agricultura', 'consumo', 'credito', 'educacional', 'especial',
+  'habitacional', 'hospitalar', 'infraestrutura', 'mineral', 'producao', 'saude',
+  'trabalho', 'transporte', 'turismo_lazer', 'outro'
+];
+
+// Validação dos campos de tenant (escritório/cooperativa/empresa) usada por
+// /register, /google/complete e /facebook/complete — os três criam um
+// tenant novo a partir dos mesmos três campos.
+function validateTenantFields(company, companyType, sector) {
+  const fields = {};
+  if (!company) fields.company = 'Informe o nome do escritório.';
+  if (!companyType) fields.companyType = 'Selecione o tipo.';
+  else if (!TENANT_TYPES.includes(companyType)) fields.companyType = 'Tipo inválido.';
+  if (!sector) fields.sector = 'Selecione a área de atuação.';
+  else if (!BUSINESS_SECTORS.includes(sector)) fields.sector = 'Área de atuação inválida.';
+  return fields;
+}
 
 const MAX_FAILED_LOGINS = 5;
 const LOCK_DURATION_MS = 15 * 60_000;
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',')[0].trim();
 
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+
+const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID || '';
+const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET || '';
+
 function genCode() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(crypto.randomInt(100000, 999999));
+}
+
+// Verifica um access token OAuth2 do Google (obtido via botão customizado +
+// google.accounts.oauth2, não mais o widget renderizado pelo Google — isso
+// permite um botão com a mesma cara dos outros, já que o widget oficial vem
+// num iframe cuja fonte/tamanho o Google controla e não conseguimos estilizar).
+async function verifyGoogleAccessToken(accessToken) {
+  if (!GOOGLE_CLIENT_ID) throw badRequest('Login com Google não está configurado neste servidor.');
+  if (!accessToken) throw badRequest('Token do Google ausente.');
+
+  let tokenInfo;
+  try {
+    const infoRes = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+    tokenInfo = await infoRes.json();
+  } catch {
+    throw unauthorized('Não foi possível validar o token do Google.');
+  }
+  if (!tokenInfo?.aud || tokenInfo.aud !== GOOGLE_CLIENT_ID) {
+    throw unauthorized('Token do Google inválido ou expirado.');
+  }
+
+  let profile;
+  try {
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    profile = await profileRes.json();
+  } catch {
+    throw unauthorized('Não foi possível obter os dados da conta Google.');
+  }
+  if (!profile?.email || String(profile.email_verified) !== 'true') {
+    throw unauthorized('Não foi possível confirmar o e-mail da conta Google.');
+  }
+  return profile;
+}
+
+async function verifyFacebookAccessToken(accessToken) {
+  if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) throw badRequest('Login com Facebook não está configurado neste servidor.');
+  if (!accessToken) throw badRequest('Token do Facebook ausente.');
+
+  const appToken = `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`;
+  let debugData;
+  try {
+    const debugRes = await fetch(`https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(accessToken)}&access_token=${encodeURIComponent(appToken)}`);
+    debugData = await debugRes.json();
+  } catch {
+    throw unauthorized('Não foi possível validar o token do Facebook.');
+  }
+  const info = debugData?.data;
+  if (!info?.is_valid || String(info.app_id) !== FACEBOOK_APP_ID) {
+    throw unauthorized('Token do Facebook inválido ou expirado.');
+  }
+
+  let profile;
+  try {
+    const profileRes = await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(info.user_id)}?fields=id,name,email&access_token=${encodeURIComponent(accessToken)}`);
+    profile = await profileRes.json();
+  } catch {
+    throw unauthorized('Não foi possível obter os dados da conta Facebook.');
+  }
+  if (!profile?.email) throw unauthorized('Não foi possível confirmar o e-mail da conta Facebook. Verifique se seu Facebook possui um e-mail associado.');
+  return profile;
+}
+
+function toSafeUser(user, tenant) {
+  return {
+    id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role,
+    plan: tenant?.plan || null, tenant_name: tenant?.name || null,
+    tenant_type: tenant?.type || null, self_client_id: tenant?.self_client_id || null,
+    avatar: user.avatar || null, avatar_color: user.avatar_color || null
+  };
+}
+
+// Cria o tenant e, quando o tipo não é "escritorio" (ou seja, não há uma
+// carteira de clientes a gerenciar), cria também um cliente-espelho com o
+// próprio nome do tenant e vincula via tenants.self_client_id — é essa
+// vinculação (não o valor de `type`) que o resto do app usa para decidir
+// entre o painel de escritório (multi-cliente) e o painel de entidade única.
+async function createTenantWithType(tx, { tenantId, company, companyType, sector }) {
+  await tx.prepare('INSERT INTO tenants (id, name, type, sector, plan) VALUES (?, ?, ?, ?, NULL)').run(tenantId, company, companyType, sector || null);
+  if (companyType !== 'escritorio') {
+    const clientId = nanoid(10);
+    await tx.prepare('INSERT INTO clients (id, tenant_id, name, type) VALUES (?, ?, ?, ?)').run(clientId, tenantId, company, companyType);
+    await tx.prepare('UPDATE tenants SET self_client_id = ? WHERE id = ?').run(clientId, tenantId);
+  }
 }
 
 // POST /auth/register
@@ -53,6 +177,8 @@ router.post('/register', registerLimit, async (req, res, next) => {
     const email = trim(req.body?.email).toLowerCase();
     const password = req.body?.password || '';
     const company = trim(req.body?.company);
+    const companyType = trim(req.body?.companyType);
+    const sector = trim(req.body?.sector);
     const role = 'manager';
 
     const fields = {};
@@ -63,30 +189,50 @@ router.post('/register', registerLimit, async (req, res, next) => {
     if (!email) fields.email = 'Informe seu e-mail.';
     else if (!isValidEmail(email)) fields.email = 'E-mail inválido.';
 
-    if (!company) fields.company = 'Informe o nome do escritório.';
+    Object.assign(fields, validateTenantFields(company, companyType, sector));
+
     if (!password) fields.password = 'Crie uma senha.';
     else if (password.length < 8) fields.password = 'Senha muito curta. Mínimo 8 caracteres.';
 
     if (Object.keys(fields).length) throw badRequest('Dados inválidos.', fields);
 
-    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existing) throw badRequest('E-mail já cadastrado.', { email: 'Este e-mail já está cadastrado. Tente entrar ou use outro.' });
+    const existing = await db.prepare(`
+      SELECT u.id, u.tenant_id, u.email_verified, t.onboarded_at
+      FROM users u LEFT JOIN tenants t ON t.id = u.tenant_id
+      WHERE u.email = ?
+    `).get(email);
+    if (existing) {
+      // Só tratamos como "cadastro abandonado" (e liberamos o e-mail para
+      // recomeçar) quando o usuário pertence a um tenant que nunca concluiu
+      // a escolha de plano. Usamos `onboarded_at` (não `plan`) porque `plan`
+      // volta a NULL quando uma assinatura é cancelada — usar `plan` aqui
+      // apagaria a conta de um cliente pagante cuja assinatura expirou.
+      // Contas sem tenant_id (administradores) nunca são consideradas
+      // abandonadas, mesmo com email_verified falso.
+      const abandoned = existing.tenant_id && (!existing.email_verified || !existing.onboarded_at);
+      if (!abandoned) {
+        throw badRequest('E-mail já cadastrado.', { email: 'Este e-mail já está cadastrado. Tente entrar ou use outro.' });
+      }
+      await db.prepare('DELETE FROM tenants WHERE id = ?').run(existing.tenant_id);
+    }
 
     const tenantId = nanoid(10);
     const userId = nanoid(10);
     const hash = await bcrypt.hash(password, 12);
-
-    await db.prepare('INSERT INTO tenants (id, name) VALUES (?, ?)').run(tenantId, company);
-    await db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role)
-                      VALUES (?, ?, ?, ?, ?, ?)`).run(userId, tenantId, name, email, hash, role);
-
     const code = genCode();
     const expires = new Date(Date.now() + 15 * 60_000).toISOString();
-    await db.prepare('INSERT INTO email_verifications (id, user_id, code, expires_at) VALUES (?, ?, ?, ?)')
-      .run(nanoid(10), userId, code, expires);
+
+    await db.transaction(async (tx) => {
+      await createTenantWithType(tx, { tenantId, company, companyType, sector });
+      await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role)
+                        VALUES (?, ?, ?, ?, ?, ?)`).run(userId, tenantId, name, email, hash, role);
+      await tx.prepare('INSERT INTO email_verifications (id, user_id, code, expires_at) VALUES (?, ?, ?, ?)')
+        .run(nanoid(10), userId, code, expires);
+    })();
 
     const emailRes = await sendVerificationEmail({ to: email, code });
-    res.json({ userId, email, devCode: emailRes.devCode });
+    const IS_PROD = process.env.NODE_ENV === 'production';
+    res.json({ userId, email, ...(IS_PROD ? {} : { devCode: emailRes.devCode }) });
   } catch (e) { next(e); }
 });
 
@@ -108,9 +254,10 @@ router.post('/verify-email', verifyLimit, async (req, res, next) => {
     await db.prepare('UPDATE email_verifications SET used = 1 WHERE id = ?').run(rec.id);
     await db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(userId);
 
-    const user = await db.prepare('SELECT id, tenant_id, name, email, role FROM users WHERE id = ?').get(userId);
+    const user = await db.prepare('SELECT id, tenant_id, name, email, role, avatar, avatar_color FROM users WHERE id = ?').get(userId);
+    const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
     const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token, user });
+    res.json({ token, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
@@ -127,7 +274,8 @@ router.post('/resend-code', verifyLimit, async (req, res, next) => {
       .run(nanoid(10), userId, code, expires);
 
     const emailRes = await sendVerificationEmail({ to: user.email, code });
-    res.json({ ok: true, devCode: emailRes.devCode });
+    const IS_PROD = process.env.NODE_ENV === 'production';
+    res.json({ ok: true, ...(IS_PROD ? {} : { devCode: emailRes.devCode }) });
   } catch (e) { next(e); }
 });
 
@@ -144,7 +292,7 @@ router.post('/login', loginLimit, async (req, res, next) => {
     if (Object.keys(fields).length) throw badRequest('Dados inválidos.', fields);
 
     const user = await db.prepare(`SELECT id, tenant_id, name, email, password_hash, role, email_verified,
-                                            failed_login_count, locked_until
+                                            failed_login_count, locked_until, avatar, avatar_color
                                      FROM users WHERE email = ?`).get(email);
     if (!user) throw unauthorized('E-mail ou senha incorretos.');
 
@@ -177,18 +325,19 @@ router.post('/login', loginLimit, async (req, res, next) => {
       await db.prepare('INSERT INTO email_verifications (id, user_id, code, expires_at) VALUES (?, ?, ?, ?)')
         .run(nanoid(10), user.id, code, expires);
       const emailRes = await sendVerificationEmail({ to: user.email, code });
+      const IS_PROD = process.env.NODE_ENV === 'production';
       return res.status(403).json({
         error: 'E-mail não verificado.', needsVerification: true,
-        userId: user.id, email: user.email, devCode: emailRes.devCode
+        userId: user.id, email: user.email,
+        ...(IS_PROD ? {} : { devCode: emailRes.devCode })
       });
     }
 
     const tenant = user.tenant_id
-      ? await db.prepare('SELECT name, plan FROM tenants WHERE id = ?').get(user.tenant_id)
+      ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id)
       : null;
     const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    const safeUser = { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role, plan: tenant?.plan || null, tenant_name: tenant?.name || null };
-    res.json({ token, user: safeUser });
+    res.json({ token, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
@@ -203,7 +352,6 @@ router.post('/forgot-password', forgotLimit, async (req, res, next) => {
     const user = await db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
 
     if (!user) {
-      console.log(`[forgot] tentativa pra e-mail inexistente: ${email}`);
       return res.json({ ok: true, message: 'Se o e-mail existir, um link foi enviado.' });
     }
 
@@ -214,7 +362,8 @@ router.post('/forgot-password', forgotLimit, async (req, res, next) => {
 
     const link = `${FRONTEND_URL}/reset-password?token=${token}`;
     const emailRes = await sendPasswordResetEmail({ to: user.email, link });
-    res.json({ ok: true, message: 'Se o e-mail existir, um link foi enviado.', devLink: emailRes.devLink });
+    const IS_PROD = process.env.NODE_ENV === 'production';
+    res.json({ ok: true, message: 'Se o e-mail existir, um link foi enviado.', ...(IS_PROD ? {} : { devLink: emailRes.devLink }) });
   } catch (e) { next(e); }
 });
 
@@ -247,7 +396,139 @@ router.post('/reset-password', resetLimit, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.get('/me', authRequired, (req, res) => {
+// POST /auth/google — login (ou vínculo automático a uma conta já existente com o mesmo e-mail)
+router.post('/google', googleLimit, async (req, res, next) => {
+  try {
+    const payload = await verifyGoogleAccessToken(req.body?.accessToken);
+    const email = payload.email.toLowerCase();
+    const googleId = payload.sub;
+
+    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, google_id
+                                  FROM users WHERE google_id = ?`).get(googleId);
+    if (!user) {
+      user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, google_id
+                                FROM users WHERE email = ?`).get(email);
+      if (user && !user.google_id) {
+        await db.prepare('UPDATE users SET google_id = ?, email_verified = 1 WHERE id = ?').run(googleId, user.id);
+      }
+    }
+
+    if (!user) {
+      return res.json({ needsSignup: true, name: trim(payload.name), email });
+    }
+
+    const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
+    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
+    res.json({ token, user: toSafeUser(user, tenant) });
+  } catch (e) { next(e); }
+});
+
+// POST /auth/google/complete — cria escritório (tenant) + conta para um login Google sem cadastro prévio
+router.post('/google/complete', googleLimit, async (req, res, next) => {
+  try {
+    const company = trim(req.body?.company);
+    const companyType = trim(req.body?.companyType);
+    const sector = trim(req.body?.sector);
+
+    const fields = validateTenantFields(company, companyType, sector);
+    if (Object.keys(fields).length) throw badRequest('Dados inválidos.', fields);
+
+    const payload = await verifyGoogleAccessToken(req.body?.accessToken);
+    const email = payload.email.toLowerCase();
+    const googleId = payload.sub;
+    const name = trim(payload.name) || email.split('@')[0];
+
+    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color
+                                  FROM users WHERE google_id = ? OR email = ?`).get(googleId, email);
+
+    if (!user) {
+      const tenantId = nanoid(10);
+      const userId = nanoid(10);
+      const randomHash = await bcrypt.hash(nanoid(32), 12);
+      await db.transaction(async (tx) => {
+        await createTenantWithType(tx, { tenantId, company, companyType, sector });
+        await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified, google_id)
+                          VALUES (?, ?, ?, ?, ?, 'manager', 1, ?)`).run(userId, tenantId, name, email, randomHash, googleId);
+      })();
+      // Evita um SELECT redundante — todos os campos já são conhecidos localmente.
+      user = { id: userId, tenant_id: tenantId, name, email, role: 'manager', avatar: null, avatar_color: null };
+    } else {
+      await db.prepare('UPDATE users SET google_id = ?, email_verified = 1 WHERE id = ?').run(googleId, user.id);
+    }
+
+    const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
+    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
+    res.json({ token, user: toSafeUser(user, tenant) });
+  } catch (e) { next(e); }
+});
+
+// POST /auth/facebook — login (ou vínculo automático a uma conta já existente com o mesmo e-mail)
+router.post('/facebook', facebookLimit, async (req, res, next) => {
+  try {
+    const profile = await verifyFacebookAccessToken(req.body?.accessToken);
+    const email = profile.email.toLowerCase();
+    const facebookId = profile.id;
+
+    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, facebook_id
+                                  FROM users WHERE facebook_id = ?`).get(facebookId);
+    if (!user) {
+      user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, facebook_id
+                                FROM users WHERE email = ?`).get(email);
+      if (user && !user.facebook_id) {
+        await db.prepare('UPDATE users SET facebook_id = ?, email_verified = 1 WHERE id = ?').run(facebookId, user.id);
+      }
+    }
+
+    if (!user) {
+      return res.json({ needsSignup: true, name: trim(profile.name), email });
+    }
+
+    const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
+    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
+    res.json({ token, user: toSafeUser(user, tenant) });
+  } catch (e) { next(e); }
+});
+
+// POST /auth/facebook/complete — cria escritório (tenant) + conta para um login Facebook sem cadastro prévio
+router.post('/facebook/complete', facebookLimit, async (req, res, next) => {
+  try {
+    const company = trim(req.body?.company);
+    const companyType = trim(req.body?.companyType);
+    const sector = trim(req.body?.sector);
+
+    const fields = validateTenantFields(company, companyType, sector);
+    if (Object.keys(fields).length) throw badRequest('Dados inválidos.', fields);
+
+    const profile = await verifyFacebookAccessToken(req.body?.accessToken);
+    const email = profile.email.toLowerCase();
+    const facebookId = profile.id;
+    const name = trim(profile.name) || email.split('@')[0];
+
+    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color
+                                  FROM users WHERE facebook_id = ? OR email = ?`).get(facebookId, email);
+
+    if (!user) {
+      const tenantId = nanoid(10);
+      const userId = nanoid(10);
+      const randomHash = await bcrypt.hash(nanoid(32), 12);
+      await db.transaction(async (tx) => {
+        await createTenantWithType(tx, { tenantId, company, companyType, sector });
+        await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified, facebook_id)
+                          VALUES (?, ?, ?, ?, ?, 'manager', 1, ?)`).run(userId, tenantId, name, email, randomHash, facebookId);
+      })();
+      // Evita um SELECT redundante — todos os campos já são conhecidos localmente.
+      user = { id: userId, tenant_id: tenantId, name, email, role: 'manager', avatar: null, avatar_color: null };
+    } else {
+      await db.prepare('UPDATE users SET facebook_id = ?, email_verified = 1 WHERE id = ?').run(facebookId, user.id);
+    }
+
+    const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
+    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
+    res.json({ token, user: toSafeUser(user, tenant) });
+  } catch (e) { next(e); }
+});
+
+router.get('/me', planExempt, authRequired, (req, res) => {
   res.json({ user: req.user });
 });
 
@@ -277,7 +558,7 @@ router.post('/accept-invite/:token', async (req, res, next) => {
   try {
     const { token } = req.params;
     const password = req.body?.password;
-    if (!password || password.length < 6) throw badRequest('Senha deve ter pelo menos 6 caracteres.', { password: 'Mínimo 6 caracteres.' });
+    if (!password || password.length < 8) throw badRequest('Senha deve ter pelo menos 8 caracteres.', { password: 'Mínimo 8 caracteres.' });
 
     const invite = await db.prepare(`
       SELECT i.id, i.user_id, i.expires_at, i.used_at, u.tenant_id, u.role
@@ -294,13 +575,13 @@ router.post('/accept-invite/:token', async (req, res, next) => {
     await db.prepare('UPDATE invites SET used_at = CURRENT_TIMESTAMP WHERE id = ?').run(invite.id);
 
     const user = await db.prepare(`
-      SELECT u.id, u.tenant_id, u.name, u.email, u.role, t.plan
-      FROM users u LEFT JOIN tenants t ON t.id = u.tenant_id
-      WHERE u.id = ?
+      SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.avatar, u.avatar_color
+      FROM users u WHERE u.id = ?
     `).get(invite.user_id);
+    const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
 
     const jwtToken = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token: jwtToken, user: { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role, plan: user.plan } });
+    res.json({ token: jwtToken, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
