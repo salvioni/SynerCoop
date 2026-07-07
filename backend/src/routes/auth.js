@@ -8,6 +8,7 @@ import { signToken } from '../lib/jwt.js';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../lib/email.js';
 import { isValidEmail, trim, badRequest, unauthorized } from '../lib/validate.js';
 import { authRequired, planExempt } from '../middleware/auth.js';
+import { DEMO_MODE } from '../lib/demo.js';
 
 function timingSafeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -232,7 +233,7 @@ router.post('/register', registerLimit, async (req, res, next) => {
 
     const emailRes = await sendVerificationEmail({ to: email, code });
     const IS_PROD = process.env.NODE_ENV === 'production';
-    res.json({ userId, email, ...(IS_PROD ? {} : { devCode: emailRes.devCode }) });
+    res.json({ userId, email, ...((IS_PROD && !DEMO_MODE) ? {} : { devCode: emailRes.devCode }) });
   } catch (e) { next(e); }
 });
 
@@ -275,7 +276,7 @@ router.post('/resend-code', verifyLimit, async (req, res, next) => {
 
     const emailRes = await sendVerificationEmail({ to: user.email, code });
     const IS_PROD = process.env.NODE_ENV === 'production';
-    res.json({ ok: true, ...(IS_PROD ? {} : { devCode: emailRes.devCode }) });
+    res.json({ ok: true, ...((IS_PROD && !DEMO_MODE) ? {} : { devCode: emailRes.devCode }) });
   } catch (e) { next(e); }
 });
 
@@ -329,7 +330,7 @@ router.post('/login', loginLimit, async (req, res, next) => {
       return res.status(403).json({
         error: 'E-mail não verificado.', needsVerification: true,
         userId: user.id, email: user.email,
-        ...(IS_PROD ? {} : { devCode: emailRes.devCode })
+        ...((IS_PROD && !DEMO_MODE) ? {} : { devCode: emailRes.devCode })
       });
     }
 
@@ -363,7 +364,7 @@ router.post('/forgot-password', forgotLimit, async (req, res, next) => {
     const link = `${FRONTEND_URL}/reset-password?token=${token}`;
     const emailRes = await sendPasswordResetEmail({ to: user.email, link });
     const IS_PROD = process.env.NODE_ENV === 'production';
-    res.json({ ok: true, message: 'Se o e-mail existir, um link foi enviado.', ...(IS_PROD ? {} : { devLink: emailRes.devLink }) });
+    res.json({ ok: true, message: 'Se o e-mail existir, um link foi enviado.', ...((IS_PROD && !DEMO_MODE) ? {} : { devLink: emailRes.devLink }) });
   } catch (e) { next(e); }
 });
 

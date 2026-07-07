@@ -1,6 +1,7 @@
 import { db } from './db.js';
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
+import { DEMO_MODE } from './demo.js';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 // Separado de IS_PROD de propósito: "está em produção" e "deve ter contas
@@ -8,7 +9,7 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // demonstração (ver Landing.jsx, botões "Entrar como X (demo)") roda com
 // NODE_ENV=production mas ainda precisa dessas contas; um lançamento real
 // não deve tê-las. Fora de produção, sempre semeia (conveniência de dev).
-const SEED_DEMO = process.env.SEED_DEMO_DATA === 'true' || !IS_PROD;
+const SEED_DEMO = DEMO_MODE || !IS_PROD;
 
 export async function seedDb() {
   await seedAdminUser();
@@ -18,7 +19,7 @@ export async function seedDb() {
   // Checa pela conta demo específica, não por "existe algum usuário não-admin"
   // — nesse deploy de demo, gente de fora se cadastra pela tela normal de
   // registro, e isso não pode impedir as contas demo de serem semeadas.
-  const existingDemo = await db.prepare('SELECT id FROM users WHERE email = ?').get('gerente@demo.com');
+  const existingDemo = await db.prepare('SELECT id FROM users WHERE email = ?').get('escritorio@demo.com');
   if (existingDemo) return;
 
   // Tenant demo
@@ -30,7 +31,7 @@ export async function seedDb() {
   const mgrHash = await bcrypt.hash('demo123', 12);
   await db.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified)
                     VALUES (?, ?, ?, ?, ?, ?, 1)`)
-    .run(mgrId, tenantId, 'Gerente Demo', 'gerente@demo.com', mgrHash, 'manager');
+    .run(mgrId, tenantId, 'Gerente Demo', 'escritorio@demo.com', mgrHash, 'manager');
 
   // Clientes demo
   const client1Id = 'client-citrus';

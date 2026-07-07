@@ -3,6 +3,37 @@
 
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
+// Hospedagem gratuita (Render) "dorme" o backend após inatividade — a
+// primeira requisição depois disso pode falhar (conexão recusada/resetada)
+// ou voltar 502/503/504 enquanto a instância acorda, o que pode levar até
+// ~1 minuto. Em vez de estourar um erro na primeira tentativa, insiste
+// algumas vezes com espera crescente antes de desistir de verdade.
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 6000;
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function fetchWithRetry(url, options, onRetry) {
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, options);
+    } catch (e) {
+      if (attempt >= MAX_RETRIES) throw e;
+      onRetry?.(attempt + 1, MAX_RETRIES);
+      await sleep(RETRY_DELAY_MS);
+      continue;
+    }
+    if (RETRYABLE_STATUS.has(res.status) && attempt < MAX_RETRIES) {
+      onRetry?.(attempt + 1, MAX_RETRIES);
+      await sleep(RETRY_DELAY_MS);
+      continue;
+    }
+    return res;
+  }
+}
+
 function getToken() {
   return localStorage.getItem('finanalyze_token');
 }
@@ -26,20 +57,20 @@ function throwIfError(res, data) {
   throw new ApiError(res.status, data?.error || `Erro ${res.status}`, data?.fields || null, null, data);
 }
 
-export async function apiCall(method, path, body) {
+export async function apiCall(method, path, body, { onRetry } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let res;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetchWithRetry(`${BASE}${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined
-    });
+    }, onRetry);
   } catch (e) {
-    throw new ApiError(0, 'Não foi possível conectar ao servidor. Verifique se o backend está rodando.', null, e);
+    throw new ApiError(0, 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.', null, e);
   }
 
   let data = null;
@@ -55,7 +86,7 @@ export async function apiCall(method, path, body) {
  * @param {File} file - objeto File do input
  * @param {object} [extra] - campos adicionais (chave: valor)
  */
-export async function uploadFile(path, file, extra = {}) {
+export async function uploadFile(path, file, extra = {}, onRetry) {
   const token = getToken();
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -68,9 +99,9 @@ export async function uploadFile(path, file, extra = {}) {
 
   let res;
   try {
-    res = await fetch(`${BASE}${path}`, { method: 'POST', headers, body: form });
+    res = await fetchWithRetry(`${BASE}${path}`, { method: 'POST', headers, body: form }, onRetry);
   } catch (e) {
-    throw new ApiError(0, 'Não foi possível conectar ao servidor.', null, e);
+    throw new ApiError(0, 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.', null, e);
   }
 
   let data = null;
@@ -84,16 +115,16 @@ export async function uploadFile(path, file, extra = {}) {
  * Download de arquivo binário (Word, PDF etc.)
  * @returns {Promise<Blob>}
  */
-export async function downloadFile(path) {
+export async function downloadFile(path, onRetry) {
   const token = getToken();
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let res;
   try {
-    res = await fetch(`${BASE}${path}`, { headers });
+    res = await fetchWithRetry(`${BASE}${path}`, { headers }, onRetry);
   } catch (e) {
-    throw new ApiError(0, 'Não foi possível conectar ao servidor.', null, e);
+    throw new ApiError(0, 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.', null, e);
   }
 
   if (!res.ok) {
@@ -116,9 +147,9 @@ export class ApiError extends Error {
 }
 
 export const api = {
-  get: (p) => apiCall('GET', p),
-  post: (p, b) => apiCall('POST', p, b),
-  put: (p, b) => apiCall('PUT', p, b),
-  patch: (p, b) => apiCall('PATCH', p, b),
-  del: (p) => apiCall('DELETE', p)
+  get: (p, opts) => apiCall('GET', p, null, opts),
+  post: (p, b, opts) => apiCall('POST', p, b, opts),
+  put: (p, b, opts) => apiCall('PUT', p, b, opts),
+  patch: (p, b, opts) => apiCall('PATCH', p, b, opts),
+  del: (p, opts) => apiCall('DELETE', p, null, opts)
 };

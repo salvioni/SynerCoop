@@ -36,7 +36,7 @@ export const MIN_PASSWORD_LENGTH = 8;
 // Landing Page.
 export const DEMO_ACCOUNTS = {
   admin: { label: 'Admin', icon: 'ti-shield', email: 'admin@demo.com', password: 'demo123' },
-  escritorio: { label: 'Escritório', icon: 'ti-briefcase', email: 'gerente@demo.com', password: 'demo123' },
+  escritorio: { label: 'Escritório', icon: 'ti-briefcase', email: 'escritorio@demo.com', password: 'demo123' },
   cooperativa: { label: 'Cooperativa', icon: 'ti-building-community', email: 'cooperativa@demo.com', password: 'demo123' },
   empresa: { label: 'Empresa', icon: 'ti-building', email: 'empresa@demo.com', password: 'demo123' },
   associacao: { label: 'Associação', icon: 'ti-users', email: 'associacao@demo.com', password: 'demo123' },

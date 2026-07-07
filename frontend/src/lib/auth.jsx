@@ -17,15 +17,15 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  async function login(email, password) {
-    const d = await api.post('/auth/login', { email, password });
+  async function login(email, password, onRetry) {
+    const d = await api.post('/auth/login', { email, password }, { onRetry });
     setToken(d.token);
     setUser(d.user);
     return d.user;
   }
 
-  async function register(payload) {
-    return await api.post('/auth/register', payload);
+  async function register(payload, onRetry) {
+    return await api.post('/auth/register', payload, { onRetry });
   }
 
   // Login com Google. Se o e-mail ainda não tiver conta, retorna

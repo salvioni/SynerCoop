@@ -36,6 +36,10 @@ export default function Landing() {
   const { login } = useAuth();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // true enquanto o cliente insiste após uma falha de rede/502-504 — cobre o
+  // "cold start" do backend gratuito (Render), que pode levar até ~1min pra
+  // acordar após ficar inativo (ver fetchWithRetry em lib/api.js).
+  const [connecting, setConnecting] = useState(false);
 
   function goAfterAuth(user) {
     navigate(user.role === 'admin' ? '/admin' : '/app/dashboard');
@@ -45,11 +49,11 @@ export default function Landing() {
     setBusy(true); setErr('');
     try {
       const acc = DEMO_ACCOUNTS[key];
-      const user = await login(acc.email, acc.password);
+      const user = await login(acc.email, acc.password, () => setConnecting(true));
       goAfterAuth(user);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'Não foi possível entrar.');
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setConnecting(false); }
   }
 
   return (
@@ -133,6 +137,7 @@ export default function Landing() {
           </p>
         </div>
 
+        {connecting && <div className="err-banner" style={{ marginBottom: 16, maxWidth: 480, background: 'var(--blue-dim)', color: 'var(--blue-text)' }}>Conectando ao servidor… a primeira tentativa pode levar até 1 minuto.</div>}
         {err && <div className="err-banner" style={{ marginBottom: 16, maxWidth: 480 }}>{err}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, maxWidth: 720 }}>

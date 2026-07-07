@@ -20,6 +20,10 @@ export default function Login() {
   const [errs, setErrs] = useState({});
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // true enquanto o cliente insiste após uma falha de rede/502-504 — ver
+  // fetchWithRetry em lib/api.js. Cobre o "cold start" do backend gratuito
+  // (Render), que pode levar até ~1min pra acordar após ficar inativo.
+  const [connecting, setConnecting] = useState(false);
 
   // Formulário de cadastro (mesma página, aba "Criar conta").
   const [regForm, setRegForm] = useState({ name: '', email: '', company: '', companyType: '', sector: '', password: '' });
@@ -48,12 +52,12 @@ export default function Login() {
       const r = await register({
         name: regForm.name.trim(), email: em.toLowerCase(), company: regForm.company.trim(),
         companyType: regForm.companyType, sector: regForm.sector, password: regForm.password, role: 'manager'
-      });
+      }, () => setConnecting(true));
       navigate('/verify', { state: { userId: r.userId, email: r.email, devCode: r.devCode } });
     } catch (e) {
       if (e instanceof ApiError && e.fields) setRegErrs(e.fields);
       else setErr(e.message || 'Não foi possível criar a conta.');
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setConnecting(false); }
   }
 
   // Preenchido quando o Google/Facebook confirma um e-mail sem conta cadastrada:
@@ -128,7 +132,7 @@ export default function Login() {
     setBusy(true);
     setErr('');
     try {
-      const user = await login(em, pw);
+      const user = await login(em, pw, () => setConnecting(true));
       goAfterAuth(user);
     } catch (e) {
       if (e instanceof ApiError) {
@@ -139,7 +143,7 @@ export default function Login() {
         if (e.fields) setErrs(e.fields);
         else setErr(e.message);
       } else setErr('Erro inesperado. Tente novamente.');
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setConnecting(false); }
   }
 
   async function onSubmit(e) {
@@ -266,7 +270,7 @@ export default function Login() {
               </div>
 
               <button className="btn btn-p" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center', padding: '10px 18px' }}>
-                {busy ? 'Criando…' : 'Criar conta'}
+                {connecting ? 'Conectando ao servidor… pode levar até 1 min' : busy ? 'Criando…' : 'Criar conta'}
               </button>
             </form>
           ) : socialPending ? (
@@ -353,7 +357,7 @@ export default function Login() {
                 </div>
 
                 <button className="btn btn-p" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center', padding: '10px 18px' }}>
-                  {busy ? 'Entrando…' : 'Entrar'}
+                  {connecting ? 'Conectando ao servidor… pode levar até 1 min' : busy ? 'Entrando…' : 'Entrar'}
                 </button>
               </form>
 

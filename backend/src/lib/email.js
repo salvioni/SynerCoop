@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { DEMO_MODE } from './demo.js';
 
 const APP_NAME = 'SynerCoop';
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -32,7 +33,11 @@ function baseHtml(title, body) {
 
 // Fora de produção (ou quando o envio falha), expõe o código/link direto na
 // resposta da API — assim o fluxo continua testável sem uma caixa de e-mail.
+// Em DEMO_MODE expõe sempre, mesmo com sent:true: o Resend em modo sandbox
+// (sem domínio verificado) só entrega pro dono da conta, então qualquer
+// outra pessoa se cadastrando nessa demo nunca receberia o e-mail de verdade.
 function withDevData(result, key, value) {
+  if (DEMO_MODE) return { ...result, [key]: value };
   return result.sent || IS_PROD ? result : { ...result, [key]: value };
 }
 
