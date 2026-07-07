@@ -31,6 +31,20 @@ export default function SelectPlan() {
     return () => clearTimeout(id);
   }, [checkout, user?.plan, pollAttempts]);
 
+  // choosePro() sai da página via window.location.href (redireciona pro
+  // Checkout do Stripe) sem nunca zerar busyPlan — se a pessoa aperta
+  // "voltar" no navegador, o Firefox/Safari/Chrome costumam restaurar essa
+  // página do bfcache exatamente como ficou congelada, com o botão travado
+  // em "Abrindo pagamento…" e os outros desabilitados. pageshow com
+  // persisted:true detecta essa restauração e libera a tela de novo.
+  useEffect(() => {
+    function onPageShow(e) {
+      if (e.persisted) setBusyPlan(null);
+    }
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
   async function chooseTrial() {
     setErr(''); setBusyPlan('trial');
     try {
