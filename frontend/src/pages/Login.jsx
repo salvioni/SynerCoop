@@ -201,7 +201,7 @@ export default function Login() {
           {isRegister ? (
             <form onSubmit={onRegisterSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 32 }}>
               <div>
-                <label className="inp-label" style={{ fontSize: 12, fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--t0)' }}>Nome completo</label>
+                <label className="inp-label" style={{ fontSize: 12, fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--t0)' }}>Nome</label>
                 <div style={{ marginTop: 6 }}>
                   <input className={`inp${regErrs.name ? ' inp-err' : ''}`} placeholder="Seu nome" required
                     value={regForm.name} onChange={e => updReg('name', e.target.value)} autoFocus />

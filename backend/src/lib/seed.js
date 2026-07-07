@@ -16,14 +16,17 @@ export async function seedDb() {
 
   if (!SEED_DEMO) return;
 
-  // Checa pela conta demo específica, não por "existe algum usuário não-admin"
+  // Checa pelo tenant demo (id fixo), não por "existe algum usuário não-admin"
   // — nesse deploy de demo, gente de fora se cadastra pela tela normal de
-  // registro, e isso não pode impedir as contas demo de serem semeadas.
-  const existingDemo = await db.prepare('SELECT id FROM users WHERE email = ?').get('escritorio@demo.com');
+  // registro, e isso não pode impedir as contas demo de serem semeadas. Tem
+  // que ser o id fixo abaixo (não o e-mail do gerente): é ele quem colide
+  // com UNIQUE constraint se essa função rodar de novo achando que ainda
+  // não semeou.
+  const tenantId = 'demo-tenant';
+  const existingDemo = await db.prepare('SELECT id FROM tenants WHERE id = ?').get(tenantId);
   if (existingDemo) return;
 
   // Tenant demo
-  const tenantId = 'demo-tenant';
   await db.prepare('INSERT INTO tenants (id, name, plan) VALUES (?, ?, ?)').run(tenantId, 'Escritório Demo Contábil', 'pro');
 
   // Usuário gerente demo

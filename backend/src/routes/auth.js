@@ -183,9 +183,8 @@ router.post('/register', registerLimit, async (req, res, next) => {
     const role = 'manager';
 
     const fields = {};
-    if (!name) fields.name = 'Informe seu nome completo.';
+    if (!name) fields.name = 'Informe seu nome.';
     else if (name.length < 3) fields.name = 'Nome muito curto.';
-    else if (!/\s/.test(name)) fields.name = 'Informe nome e sobrenome.';
 
     if (!email) fields.email = 'Informe seu e-mail.';
     else if (!isValidEmail(email)) fields.email = 'E-mail inválido.';
