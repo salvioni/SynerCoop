@@ -1,15 +1,11 @@
 import { Router } from 'express';
-import Stripe from 'stripe';
 import { db } from '../lib/db.js';
 import { authRequired, managerOnly, planExempt } from '../middleware/auth.js';
 import { badRequest } from '../lib/validate.js';
 import logger from '../lib/logger.js';
+import { stripe } from '../lib/stripe.js';
 
 const router = Router();
-
-const stripe = process.env.STRIPE_SECRET_KEY
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
-  : null;
 
 // Planos com assinatura self-serve via Stripe Checkout. Enterprise é sob
 // consulta (fluxo comercial manual), por isso não tem price aqui.
@@ -34,7 +30,11 @@ router.post('/create-checkout', planExempt, authRequired, managerOnly, async (re
     let customerId = tenant.stripe_customer_id;
     if (!customerId) {
       const customer = await stripe.customers.create({
-        email: req.user.email,
+        // "E-mail de cobrança" (Ajustes > Escritório) é opcional e costuma
+        // ser diferente do e-mail de login de quem faz o checkout (ex.:
+        // financeiro da empresa vs. gerente que assina o plano) — quando
+        // preenchido, é ele que deve receber faturas do Stripe.
+        email: tenant.billing_email || req.user.email,
         name: tenant.name,
         metadata: { tenant_id: tenant.id },
       });

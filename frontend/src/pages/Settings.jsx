@@ -13,8 +13,14 @@ export default function Settings() {
   const location = useLocation();
   const [info, setInfo] = useState(null);
   const [companyName, setCompanyName] = useState('');
+  const [cnpj, setCnpj] = useState('');
+  const [phone, setPhone] = useState('');
+  const [billingEmail, setBillingEmail] = useState('');
   const [editOffice, setEditOffice] = useState(false);
   const [draft, setDraft] = useState('');
+  const [draftCnpj, setDraftCnpj] = useState('');
+  const [draftPhone, setDraftPhone] = useState('');
+  const [draftBillingEmail, setDraftBillingEmail] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [editProfile, setEditProfile] = useState(false);
@@ -27,11 +33,9 @@ export default function Settings() {
   const [avatarRemoved, setAvatarRemoved] = useState(false);
   const avatarRef = useRef(null);
 
-  const [editBrand, setEditBrand] = useState(false);
   const [brandLogo, setBrandLogo] = useState(null);
   const [pendingLogoFile, setPendingLogoFile] = useState(null);
   const [logoRemoved, setLogoRemoved] = useState(false);
-  const [savingBrand, setSavingBrand] = useState(false);
   const brandLogoRef = useRef(null);
 
   const [members, setMembers] = useState([]);
@@ -48,6 +52,9 @@ export default function Settings() {
     api.get('/account').then(d => {
       setInfo(d);
       setCompanyName(d.companyName || '');
+      setCnpj(d.cnpj || '');
+      setPhone(d.phone || '');
+      setBillingEmail(d.billingEmail || '');
       setBrandLogo(d.logo || null);
     }).catch(() => {});
     loadMembers();
@@ -98,16 +105,37 @@ export default function Settings() {
     setAvatarColor(user?.avatar_color || null);
   }, [user?.avatar, user?.avatar_color]);
 
-  function startEdit() { setDraft(companyName); setEditOffice(true); }
-  function cancelEdit() { setEditOffice(false); }
+  function startEdit() {
+    setDraft(companyName);
+    setDraftCnpj(cnpj);
+    setDraftPhone(phone);
+    setDraftBillingEmail(billingEmail);
+    setEditOffice(true);
+  }
+  function cancelEdit() {
+    setEditOffice(false);
+    setBrandLogo(info?.logo || null);
+    setPendingLogoFile(null);
+    setLogoRemoved(false);
+  }
 
   async function saveOffice(e) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.patch('/account', { name: draft });
+      await api.patch('/account', { name: draft, cnpj: draftCnpj, phone: draftPhone, billingEmail: draftBillingEmail });
+      if (pendingLogoFile) await uploadFile('/account/logo', pendingLogoFile);
+      else if (logoRemoved) await api.del('/account/logo');
       await refresh();
-      setCompanyName(draft);
+      const d = await api.get('/account');
+      setInfo(d);
+      setCompanyName(d.companyName || '');
+      setCnpj(d.cnpj || '');
+      setPhone(d.phone || '');
+      setBillingEmail(d.billingEmail || '');
+      setBrandLogo(d.logo || null);
+      setPendingLogoFile(null);
+      setLogoRemoved(false);
       setEditOffice(false);
     } catch (err) {
       alert(err.message || 'Erro ao salvar.');
@@ -180,17 +208,8 @@ export default function Settings() {
     setAvatarRemoved(true);
   }
 
-  function startEditBrand() { setEditBrand(true); }
-
   // Mesmo padrão do avatar de perfil: escolher/remover logo só atualiza o
   // preview local — nada é enviado até Salvar, e Cancelar descarta tudo.
-  function cancelEditBrand() {
-    setEditBrand(false);
-    setBrandLogo(info?.logo || null);
-    setPendingLogoFile(null);
-    setLogoRemoved(false);
-  }
-
   function pickBrandLogoFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -206,25 +225,6 @@ export default function Settings() {
     setBrandLogo(null);
     setPendingLogoFile(null);
     setLogoRemoved(true);
-  }
-
-  async function saveBrand(e) {
-    e.preventDefault();
-    setSavingBrand(true);
-    try {
-      if (pendingLogoFile) await uploadFile('/account/logo', pendingLogoFile);
-      else if (logoRemoved) await api.del('/account/logo');
-      const d = await api.get('/account');
-      setInfo(d);
-      setBrandLogo(d.logo || null);
-      setPendingLogoFile(null);
-      setLogoRemoved(false);
-      setEditBrand(false);
-    } catch (err) {
-      alert(err.message || 'Erro ao salvar.');
-    } finally {
-      setSavingBrand(false);
-    }
   }
 
   return (
@@ -283,7 +283,7 @@ export default function Settings() {
                 <i className="ti ti-trash"></i> Remover foto
               </button>
             )}
-            <input ref={avatarRef} type="file" accept="image/*" onChange={pickAvatarFile} style={{ display: 'none' }} />
+            <input ref={avatarRef} type="file" accept="image/png,image/jpeg,image/bmp" onChange={pickAvatarFile} style={{ display: 'none' }} />
           </div>
         )}
 
@@ -340,11 +340,44 @@ export default function Settings() {
               </div>
           }
         </div>
-        {/* key força o remount ao entrar/sair do modo de edição — os campos
-            abaixo (CNPJ, e-mail, telefone) ainda não têm estado próprio nem
-            persistência no backend, então usam defaultValue (não controlado);
-            sem o remount, o texto digitado ficaria visível mesmo após Cancelar. */}
-        <div className="grid-2" key={editOffice ? 'editing' : 'view'}>
+
+        <div style={{ marginBottom: 20 }}>
+          <span className="inp-label">Logo do escritório</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: 10 }}>
+            <div style={{
+              position: 'relative', width: 64, height: 64, flexShrink: 0,
+              cursor: editOffice ? 'pointer' : 'default',
+            }} onClick={() => editOffice && brandLogoRef.current?.click()}>
+              <div style={{
+                width: 64, height: 64, borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--bd)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+                ...(brandLogo ? { backgroundImage: `url(${brandLogo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}),
+              }}>
+                {!brandLogo && <i className="ti ti-building" style={{ fontSize: 24, color: 'var(--t3)' }}></i>}
+              </div>
+              {editOffice && (
+                <div style={{
+                  position: 'absolute', bottom: -4, right: -4, width: 22, height: 22, borderRadius: '50%',
+                  background: 'var(--bg1)', border: '2px solid var(--bg0)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 1px 3px rgba(0,0,0,.25)',
+                }}>
+                  <i className="ti ti-camera" style={{ fontSize: 11, color: 'var(--t1)' }}></i>
+                </div>
+              )}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, color: 'var(--t2)' }}>Aparece na capa dos relatórios baixados. PNG, JPG ou BMP.</div>
+              {editOffice && brandLogo && (
+                <button type="button" className="btn" style={{ fontSize: 12, color: 'var(--red-t)', marginTop: 8 }} onClick={stageRemoveBrandLogo}>
+                  <i className="ti ti-trash"></i> Remover logo
+                </button>
+              )}
+            </div>
+            <input ref={brandLogoRef} type="file" accept="image/png,image/jpeg,image/bmp" onChange={pickBrandLogoFile} style={{ display: 'none' }} />
+          </div>
+        </div>
+
+        <div className="grid-2">
           <label style={{ display: 'block' }}>
             <span className="inp-label">Nome</span>
             {editOffice
@@ -352,9 +385,27 @@ export default function Settings() {
               : <input className="inp" value={companyName} disabled style={{ marginTop: 6 }} />
             }
           </label>
-          <Field label="CNPJ" value="" placeholder="00.000.000/0001-00" disabled={!editOffice} />
-          <Field label="E-mail de cobrança" value={user?.email || ''} disabled={!editOffice} />
-          <Field label="Telefone" value="" placeholder="(00) 00000-0000" disabled={!editOffice} />
+          <label style={{ display: 'block' }}>
+            <span className="inp-label">CNPJ</span>
+            {editOffice
+              ? <input className="inp" value={draftCnpj} onChange={e => setDraftCnpj(e.target.value)} placeholder="00.000.000/0001-00" style={{ marginTop: 6 }} />
+              : <input className="inp" value={cnpj} placeholder="00.000.000/0001-00" disabled style={{ marginTop: 6 }} />
+            }
+          </label>
+          <label style={{ display: 'block' }}>
+            <span className="inp-label">E-mail de cobrança</span>
+            {editOffice
+              ? <input className="inp" type="email" value={draftBillingEmail} onChange={e => setDraftBillingEmail(e.target.value)} style={{ marginTop: 6 }} />
+              : <input className="inp" value={billingEmail} disabled style={{ marginTop: 6 }} />
+            }
+          </label>
+          <label style={{ display: 'block' }}>
+            <span className="inp-label">Telefone</span>
+            {editOffice
+              ? <input className="inp" value={draftPhone} onChange={e => setDraftPhone(e.target.value)} placeholder="(00) 00000-0000" style={{ marginTop: 6 }} />
+              : <input className="inp" value={phone} placeholder="(00) 00000-0000" disabled style={{ marginTop: 6 }} />
+            }
+          </label>
         </div>
       </section>
       </form>
@@ -383,60 +434,6 @@ export default function Settings() {
           ))}
         </div>
       </section>
-
-      <form onSubmit={saveBrand}>
-      <section style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', margin: 0 }}>Marca branca</h2>
-          {!editBrand
-            ? <button type="button" className="btn" onClick={startEditBrand}><i className="ti ti-edit"></i> Editar</button>
-            : <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" className="btn" onClick={cancelEditBrand} disabled={savingBrand}>Cancelar</button>
-                <button type="submit" className="btn btn-p" disabled={savingBrand}>{savingBrand ? 'Salvando…' : 'Salvar'}</button>
-              </div>
-          }
-        </div>
-        <p style={{ fontSize: 14, color: 'var(--t2)', marginTop: 4, marginBottom: 16 }}>Personalize o logo, cores e capa dos relatórios.</p>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 20 }}>
-          <div style={{
-            position: 'relative', width: 64, height: 64, flexShrink: 0,
-            cursor: editBrand ? 'pointer' : 'default',
-          }} onClick={() => editBrand && brandLogoRef.current?.click()}>
-            <div style={{
-              width: 64, height: 64, borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--bd)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-              ...(brandLogo ? { backgroundImage: `url(${brandLogo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}),
-            }}>
-              {!brandLogo && <i className="ti ti-building" style={{ fontSize: 24, color: 'var(--t3)' }}></i>}
-            </div>
-            {editBrand && (
-              <div style={{
-                position: 'absolute', bottom: -4, right: -4, width: 22, height: 22, borderRadius: '50%',
-                background: 'var(--bg1)', border: '2px solid var(--bg0)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 1px 3px rgba(0,0,0,.25)',
-              }}>
-                <i className="ti ti-camera" style={{ fontSize: 11, color: 'var(--t1)' }}></i>
-              </div>
-            )}
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t0)' }}>Logo do escritório</div>
-            <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 2 }}>Aparece na capa dos relatórios DOCX baixados. PNG, JPG, GIF ou BMP.</div>
-            {editBrand && brandLogo && (
-              <button type="button" className="btn" style={{ fontSize: 12, color: 'var(--red-t)', marginTop: 8 }} onClick={stageRemoveBrandLogo}>
-                <i className="ti ti-trash"></i> Remover logo
-              </button>
-            )}
-          </div>
-          <input ref={brandLogoRef} type="file" accept="image/png,image/jpeg,image/gif,image/bmp" onChange={pickBrandLogoFile} style={{ display: 'none' }} />
-        </div>
-
-        <div key={editBrand ? 'editing' : 'view'}>
-          <Field label="Assinatura nos relatórios" value="Meu Escritório — Análise Financeira" disabled={!editBrand} />
-        </div>
-      </section>
-      </form>
 
       <section style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
         <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', marginBottom: 16 }}>Plano e cobrança</h2>
@@ -497,14 +494,5 @@ export default function Settings() {
       </div>
     )}
     </>
-  );
-}
-
-function Field({ label, value, placeholder, disabled }) {
-  return (
-    <label style={{ display: 'block' }}>
-      <span className="inp-label">{label}</span>
-      <input className="inp" defaultValue={value} placeholder={placeholder} disabled={disabled} style={{ marginTop: 6 }} />
-    </label>
   );
 }

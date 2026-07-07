@@ -8,7 +8,7 @@ import {
 import { imageSize } from 'image-size';
 import { generateText, parseJsonFromLLM } from './llm.js';
 
-const LOGO_MIME_TO_DOCX_TYPE = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/bmp': 'bmp' };
+const LOGO_MIME_TO_DOCX_TYPE = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/bmp': 'bmp' };
 const LOGO_MAX_WIDTH = 160;
 const LOGO_MAX_HEIGHT = 90;
 

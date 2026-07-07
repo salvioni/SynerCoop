@@ -20,6 +20,16 @@ const ALLOWED_MIMES = new Set([
 ]);
 const ALLOWED_EXTS = new Set(['.pdf', '.xlsx', '.xls']);
 
+// Logo do cliente chega como data URL (data:<mime>;base64,<...>) no corpo
+// JSON, não como upload multipart — por isso a checagem de tipo é feita aqui
+// no data URL em vez de fileFilter do multer. Sem GIF (evita imagem animada
+// no card do cliente), mesma allow-list do logo do escritório (account.js).
+const LOGO_ALLOWED_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/bmp']);
+function validateLogoDataUrl(dataUrl) {
+  const match = /^data:([^;]+);base64,/.exec(dataUrl);
+  if (!match || !LOGO_ALLOWED_MIMES.has(match[1])) throw badRequest('Formato de imagem não suportado. Use PNG, JPG ou BMP.');
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
@@ -76,7 +86,10 @@ router.post('/', async (req, res, next) => {
     const logo_color = req.body?.logo_color || null;
 
     if (!name) throw badRequest('Nome é obrigatório.', { name: 'Informe o nome da empresa.' });
-    if (logo && logo.length > 2 * 1024 * 1024 * 1.4) throw badRequest('Imagem muito grande. Máximo 2 MB.');
+    if (logo) {
+      if (logo.length > 2 * 1024 * 1024 * 1.4) throw badRequest('Imagem muito grande. Máximo 2 MB.');
+      validateLogoDataUrl(logo);
+    }
     if (logo_color && !/^#[0-9A-Fa-f]{6}$/.test(logo_color)) throw badRequest('Cor inválida.');
 
     const existing = cnpj
@@ -131,7 +144,10 @@ router.put('/:id', async (req, res, next) => {
     const logo_color = req.body?.logo_color !== undefined ? (req.body.logo_color || null) : undefined;
 
     if (!name) throw badRequest('Nome é obrigatório.', { name: 'Informe o nome da empresa.' });
-    if (logo && logo.length > 2 * 1024 * 1024 * 1.4) throw badRequest('Imagem muito grande. Máximo 2 MB.');
+    if (logo) {
+      if (logo.length > 2 * 1024 * 1024 * 1.4) throw badRequest('Imagem muito grande. Máximo 2 MB.');
+      validateLogoDataUrl(logo);
+    }
     if (logo_color && !/^#[0-9A-Fa-f]{6}$/.test(logo_color)) throw badRequest('Cor inválida.');
 
     const extraCols = [...(logo !== undefined ? [', logo = ?'] : []), ...(logo_color !== undefined ? [', logo_color = ?'] : [])].join('');

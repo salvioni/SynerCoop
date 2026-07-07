@@ -260,6 +260,10 @@ export async function initDb() {
     `ALTER TABLE tenants ADD COLUMN onboarded_at TIMESTAMP`,
     // Logo do escritório/empresa (base64), usado na marca branca dos relatórios.
     `ALTER TABLE tenants ADD COLUMN logo TEXT`,
+    // Dados de contato do escritório exibidos/editáveis em Ajustes > Escritório.
+    `ALTER TABLE tenants ADD COLUMN cnpj TEXT`,
+    `ALTER TABLE tenants ADD COLUMN phone TEXT`,
+    `ALTER TABLE tenants ADD COLUMN billing_email TEXT`,
     // Assinatura da análise — quando preenchido, trava edição da narrativa e
     // estampa "assinado por X em Y" no relatório baixável (ver lib/report.js).
     `ALTER TABLE analyses ADD COLUMN signed_at TIMESTAMP`,

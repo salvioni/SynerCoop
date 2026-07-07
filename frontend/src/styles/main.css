@@ -398,6 +398,7 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px }
 .theme-dark .overlay { background: rgba(0,0,0,.65) }
 .modal { background: var(--bg1); border: 1px solid var(--bd); border-radius: var(--rl); width: 100%; max-width: 400px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,.12) }
+.modal-wide { max-width: 560px; min-height: 580px }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 15px; border-bottom: 1px solid var(--bd) }
 .modal-title { font-size: 14px; font-weight: 600; color: var(--t0) }
 .modal-close { background: none; border: none; color: var(--t2); display: flex; padding: 2px }

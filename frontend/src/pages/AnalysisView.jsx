@@ -211,7 +211,7 @@ export default function AnalysisView() {
             </button>
           )}
           <button className="btn btn-p" onClick={downloadReport} disabled={reporting}>
-            {reporting ? <><i className="ti ti-loader"></i> Gerando…</> : <><i className="ti ti-file-download"></i> Baixar DOCX</>}
+            {reporting ? <><i className="ti ti-loader"></i> Gerando…</> : <><i className="ti ti-file-download"></i> Baixar Relatório</>}
           </button>
           <button className="btn" onClick={() => {
             const url = window.location.href;
