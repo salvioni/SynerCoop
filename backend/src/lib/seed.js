@@ -3,14 +3,23 @@ import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
+// Separado de IS_PROD de propósito: "está em produção" e "deve ter contas
+// demo com senha pública (demo123)" são decisões diferentes — um deploy de
+// demonstração (ver Landing.jsx, botões "Entrar como X (demo)") roda com
+// NODE_ENV=production mas ainda precisa dessas contas; um lançamento real
+// não deve tê-las. Fora de produção, sempre semeia (conveniência de dev).
+const SEED_DEMO = process.env.SEED_DEMO_DATA === 'true' || !IS_PROD;
 
 export async function seedDb() {
   await seedAdminUser();
 
-  if (IS_PROD) return;
+  if (!SEED_DEMO) return;
 
-  const row = await db.prepare("SELECT COUNT(*) AS c FROM users WHERE role != 'admin'").get();
-  if ((row?.c ?? 0) > 0) return;
+  // Checa pela conta demo específica, não por "existe algum usuário não-admin"
+  // — nesse deploy de demo, gente de fora se cadastra pela tela normal de
+  // registro, e isso não pode impedir as contas demo de serem semeadas.
+  const existingDemo = await db.prepare('SELECT id FROM users WHERE email = ?').get('gerente@demo.com');
+  if (existingDemo) return;
 
   // Tenant demo
   const tenantId = 'demo-tenant';

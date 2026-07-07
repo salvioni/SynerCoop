@@ -11,6 +11,11 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Esse deploy é uma demo pública (ver render.yaml no repo) — mantém as
+      # contas "Entrar como X (demo)" da Landing Page ativas. Numa instância
+      # de produção real, remova esta variável (ou defina como "false").
+      - key: SEED_DEMO_DATA
+        value: 'true'
       # Gerado automaticamente pelo Render — nunca hardcode isso no repo.
       - key: JWT_SECRET
         generateValue: true
