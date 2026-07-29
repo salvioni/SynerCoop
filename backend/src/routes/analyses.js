@@ -5,6 +5,8 @@ import { badRequest } from '../lib/validate.js';
 import { audit, ACTIONS } from '../lib/audit.js';
 import { generateReport } from '../lib/report.js';
 import { generateAnalysisNarrative } from '../lib/narrative.js';
+import { buildAnalysisExcel } from '../lib/excelExport.js';
+import { periodSlug } from '../lib/period.js';
 
 const router = Router();
 router.use(authRequired);
@@ -15,7 +17,7 @@ router.get('/', async (req, res, next) => {
     const { page = 1, limit = 20, clientId } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     let sql = `
-      SELECT a.id, a.year, a.status, a.confidence, a.created_at, a.signed_at,
+      SELECT a.id, a.year, a.period_label, a.status, a.confidence, a.created_at, a.signed_at,
         c.id AS client_id, c.name AS client_name, c.active AS client_active,
         u.name AS user_name, u.avatar AS user_avatar, u.avatar_color AS user_avatar_color
       FROM analyses a
@@ -84,13 +86,39 @@ router.get('/:id/report', async (req, res, next) => {
       parsed.narrative,
       req.user.tenant_logo,
       analysis.status === 'signed' ? { name: analysis.signed_by_name, at: analysis.signed_at } : null,
+      analysis.period_label,
     );
 
     const safeName = (analysis.client_name || 'cliente').replace(/[^a-zA-Z0-9À-ÿ._-]/g, '_');
-    const filename = `relatorio_${safeName}_${analysis.year}.docx`;
+    const filename = `relatorio_${safeName}_${periodSlug(analysis.year, analysis.period_label)}.docx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(docBuffer);
+  } catch (e) { next(e); }
+});
+
+// GET /analyses/:id/excel — generate and download the filled Balanço Perguntado
+router.get('/:id/excel', async (req, res, next) => {
+  try {
+    const analysis = await db.prepare(`
+      SELECT a.*, c.name AS client_name, c.tenant_id
+      FROM analyses a JOIN clients c ON c.id = a.client_id
+      WHERE a.id = ?
+    `).get(req.params.id);
+
+    if (!analysis || analysis.tenant_id !== req.user.tenant_id) throw badRequest('Análise não encontrada.');
+
+    const parsed = _parseAnalysis(analysis);
+    const excelBuffer = await buildAnalysisExcel({
+      bp: parsed.bp, dsp: parsed.dsp, year: analysis.year,
+      detail: parseJsonField(analysis.detail),
+    });
+
+    const safeName = (analysis.client_name || 'cliente').replace(/[^a-zA-Z0-9À-ÿ._-]/g, '_');
+    const filename = `balanco_${safeName}_${periodSlug(analysis.year, analysis.period_label)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(excelBuffer);
   } catch (e) { next(e); }
 });
 

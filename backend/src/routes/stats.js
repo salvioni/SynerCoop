@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { db } from '../lib/db.js';
 import { authRequired } from '../middleware/auth.js';
-import { startOfMonthISO, monthsAgoISO } from '../lib/date.js';
+import { monthsAgoISO } from '../lib/date.js';
+import { countMonthlyAnalyses } from '../lib/audit.js';
 
 const router = Router();
 router.use(authRequired);
@@ -15,10 +16,7 @@ router.get('/', async (req, res, next) => {
       db.prepare('SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ?').get(tenantId),
       db.prepare('SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ? AND active = 1').get(tenantId),
       db.prepare(`SELECT COUNT(*) AS cnt FROM analyses a JOIN clients c ON c.id = a.client_id WHERE c.tenant_id = ?`).get(tenantId),
-      db.prepare(`
-        SELECT COUNT(*) AS cnt FROM analyses a JOIN clients c ON c.id = a.client_id
-        WHERE c.tenant_id = ? AND a.created_at >= ?
-      `).get(tenantId, startOfMonthISO()),
+      countMonthlyAnalyses(tenantId),
       db.prepare('SELECT plan FROM tenants WHERE id = ?').get(tenantId),
     ]);
 
@@ -51,7 +49,7 @@ router.get('/', async (req, res, next) => {
       totalClients: totalClients?.cnt || 0,
       activeClients: activeClients?.cnt || 0,
       totalAnalyses: totalAnalyses?.cnt || 0,
-      monthlyAnalyses: monthlyAnalyses?.cnt || 0,
+      monthlyAnalyses,
       plan: tenant?.plan || 'trial',
       byMonth,
       recentAnalyses,

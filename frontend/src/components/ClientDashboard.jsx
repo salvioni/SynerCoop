@@ -5,6 +5,8 @@ import { useBackNavigate } from '../lib/useBackNavigate.js';
 import ConfirmModal from './ConfirmModal.jsx';
 import ClientFormModal from './ClientFormModal.jsx';
 import { initials } from './UserAvatar.jsx';
+import { periodLabel, periodShort } from '../lib/period.js';
+import { SIGNING_ENABLED } from '../lib/constants.js';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 const FMT = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact', maximumFractionDigits: 1 });
@@ -25,6 +27,7 @@ const PIE_COLORS = [COLORS.blue, COLORS.gold, COLORS.green, COLORS.muted];
 function parseAnalysis(a) {
   return {
     year: a.year,
+    period_label: a.period_label,
     bp: typeof a.bp === 'string' ? JSON.parse(a.bp || '{}') : (a.bp || {}),
     dsp: typeof a.dsp === 'string' ? JSON.parse(a.dsp || '{}') : (a.dsp || {}),
     ind: typeof a.indicators === 'string' ? JSON.parse(a.indicators || '{}') : (a.indicators || {}),
@@ -103,13 +106,13 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
 
   if (loading || !client) return null;
 
-  const sorted = [...analyses].sort((a, b) => a.year - b.year);
+  const sorted = [...analyses].sort((a, b) => a.year - b.year || new Date(a.created_at) - new Date(b.created_at));
   const parsed = sorted.map(parseAnalysis);
   const latest = parsed[parsed.length - 1];
 
   const STATS = [
     { label: 'Total de análises', val: analyses.length, icon: 'ti-chart-bar' },
-    { label: 'Último exercício', val: latest?.year || '—', icon: 'ti-calendar' },
+    { label: 'Último exercício', val: latest ? periodShort(latest) : '—', icon: 'ti-calendar' },
     { label: 'Ativo Total', val: brl(latest?.bp?.total_ativo), icon: 'ti-building-bank' },
     { label: 'Receita Líquida', val: brl(latest?.dsp?.receita_liquida ?? latest?.dsp?.ingressos), icon: 'ti-trending-up' },
   ];
@@ -125,14 +128,14 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
 
   // Chart data
   const evolutionData = parsed.map(p => ({
-    name: String(p.year),
+    name: periodShort(p),
     'Ativo Total': p.bp.total_ativo || 0,
     'Receita Líquida': p.dsp.receita_liquida || p.dsp.ingressos || 0,
     'Sobras/Perdas': p.dsp.sobras_perdas || 0,
   }));
 
   const indicatorData = parsed.map(p => ({
-    name: String(p.year),
+    name: periodShort(p),
     'Liquidez Corrente': p.ind.liquidez?.liquidez_corrente || 0,
     'Endividamento %': (p.ind.endividamento?.endividamento_total_pct || 0) * 100,
     'ROE %': (p.ind.rentabilidade?.rentabilidade_pl_pct || 0) * 100,
@@ -234,7 +237,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
               </ResponsiveContainer>
             </ChartCard>
           ) : (
-            <ChartCard title="Composição do Ativo" subtitle={`Exercício ${latest.year}`}>
+            <ChartCard title="Composição do Ativo" subtitle={periodLabel(latest)}>
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
                   <Pie data={compositionData} dataKey="value" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
@@ -255,7 +258,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
             </ChartCard>
           )}
 
-          <ChartCard title="Resultado (DSP)" subtitle={`Exercício ${latest.year}`}>
+          <ChartCard title="Resultado (DSP)" subtitle={periodLabel(latest)}>
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie data={dspData} dataKey="value" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
@@ -302,7 +305,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
         <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginBottom: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h3 style={{ fontSize: 20, fontWeight: 500, letterSpacing: '0.01em' }}>Indicadores-chave</h3>
-            <span style={{ fontSize: 12, color: 'var(--t2)' }}>Exercício {latest.year}</span>
+            <span style={{ fontSize: 12, color: 'var(--t2)' }}>{periodLabel(latest)}</span>
           </div>
           <div className="grid-3">
             {KEY_IND.map(({ label, val, good }) => (
@@ -334,7 +337,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
             Nenhuma análise realizada.
           </div>
         ) : (
-          [...analyses].sort((a, b) => b.year - a.year).map((a, i) => (
+          [...analyses].sort((a, b) => b.year - a.year || new Date(b.created_at) - new Date(a.created_at)).map((a, i) => (
             <div key={a.id}
               onClick={() => navigate(`/app/analyses/${a.id}`)}
               style={{
@@ -352,15 +355,17 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                 {a.year}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t0)' }}>Exercício {a.year}</div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t0)' }}>{periodLabel(a)}</div>
                 <div style={{ fontSize: 12, color: 'var(--t2)', marginTop: 2 }}>
                   {new Date(a.created_at).toLocaleDateString('pt-BR')}
                 </div>
               </div>
-              <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{a.status === 'signed' ? 'Assinada' : 'Editável'}</span>
+              {SIGNING_ENABLED && (
+                <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{a.status === 'signed' ? 'Assinada' : 'Editável'}</span>
+              )}
               <div onClick={e => e.stopPropagation()}>
                 <button className="ib ib-d" title="Excluir" onClick={() => setConfirm({
-                  title: `Excluir análise ${a.year}?`,
+                  title: `Excluir análise de ${periodShort(a)}?`,
                   message: 'Esta ação é irreversível.',
                   danger: true, confirmLabel: 'Excluir',
                   onConfirm: () => deleteAnalysis(a),

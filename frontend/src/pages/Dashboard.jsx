@@ -6,6 +6,8 @@ import { getPlan } from '../lib/plans.js';
 import UserAvatar from '../components/UserAvatar.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import ClientDashboard from '../components/ClientDashboard.jsx';
+import { periodLabel } from '../lib/period.js';
+import { SIGNING_ENABLED } from '../lib/constants.js';
 
 function greeting() {
   const h = new Date().getHours();
@@ -74,10 +76,12 @@ export default function Dashboard() {
               <div className="dash-analysis-info">
                 <div className="dash-analysis-name">{a.client_name || 'Cliente'}</div>
                 <div className="dash-analysis-meta">
-                  Exercício {a.year} · {new Date(a.created_at).toLocaleDateString('pt-BR')}
+                  {periodLabel(a)} · {new Date(a.created_at).toLocaleDateString('pt-BR')}
                 </div>
               </div>
-              <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{a.status === 'signed' ? 'Assinada' : 'Editável'}</span>
+              {SIGNING_ENABLED && (
+                <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{a.status === 'signed' ? 'Assinada' : 'Editável'}</span>
+              )}
             </div>
           )) : (
             <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--t3)', fontSize: 14 }}>

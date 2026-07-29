@@ -4,8 +4,7 @@ import multer from 'multer';
 import { db } from '../lib/db.js';
 import { authRequired, managerOnly, planExempt } from '../middleware/auth.js';
 import { badRequest, trim, isValidEmail } from '../lib/validate.js';
-import { audit, ACTIONS } from '../lib/audit.js';
-import { startOfMonthISO } from '../lib/date.js';
+import { audit, ACTIONS, countMonthlyAnalyses } from '../lib/audit.js';
 import { stripe } from '../lib/stripe.js';
 import logger from '../lib/logger.js';
 
@@ -22,11 +21,7 @@ router.get('/', planExempt, authRequired, async (req, res, next) => {
       JOIN clients c ON c.id = a.client_id
       WHERE c.tenant_id = ?
     `).get(req.user.tenant_id);
-    const monthlyCount = await db.prepare(`
-      SELECT COUNT(*) AS cnt FROM analyses a
-      JOIN clients c ON c.id = a.client_id
-      WHERE c.tenant_id = ? AND a.created_at >= ?
-    `).get(req.user.tenant_id, startOfMonthISO());
+    const monthlyCount = await countMonthlyAnalyses(req.user.tenant_id);
     res.json({
       companyName: tenant?.name || '',
       logo: tenant?.logo || null,
@@ -39,7 +34,7 @@ router.get('/', planExempt, authRequired, async (req, res, next) => {
       plan: tenant?.plan || null,
       activeClients: clientCount?.cnt || 0,
       totalAnalyses: analysisCount?.cnt || 0,
-      monthlyAnalyses: monthlyCount?.cnt || 0,
+      monthlyAnalyses: monthlyCount,
     });
   } catch (e) { next(e); }
 });

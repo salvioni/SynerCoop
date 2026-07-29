@@ -32,7 +32,16 @@ Regras:
 - Linguagem profissional mas acessível para contadores e diretores
 - Cooperativas usam "sobras/perdas" em vez de "lucro/prejuízo"
 - Cite valores exatos dos indicadores
-- Recomendações práticas e acionáveis`;
+- Recomendações práticas e acionáveis
+- Campos com valor null (no BALANÇO PATRIMONIAL/DSP/INDICADORES acima) não foram
+  encontrados no documento original — é diferente de valer zero. NUNCA afirme que
+  esses campos valem zero ou que "não há" o que quer que seja com base neles (ex:
+  não diga "a cooperativa não tem empréstimos" se o campo é null — diga que a
+  informação não estava disponível no documento, ou simplesmente não cite esse valor)
+- Se a maioria dos indicadores vier null, isso significa que o documento não tinha
+  dados suficientes para a análise — NÃO invente uma narrativa (ex: "a cooperativa
+  está inativa/foi dissolvida"). Nesse caso, o sumário deve dizer objetivamente que
+  os dados disponíveis são insuficientes para uma análise financeira completa`;
 
 export async function generateAnalysisNarrative({ companyName, companyType, year, indicators, bp, dsp }) {
   const prompt = NARRATIVE_PROMPT

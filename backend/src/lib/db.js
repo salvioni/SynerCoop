@@ -272,6 +272,15 @@ export async function initDb() {
     // migra os registros antigos para o novo vocabulário (idempotente: só
     // afeta linhas que ainda não foram assinadas).
     `UPDATE analyses SET status = 'editable' WHERE status = 'done'`,
+    // Detalhe granular (contas/sub-itens do questionário Balanço Perguntado),
+    // capturado só quando o arquivo enviado já está nesse formato padrão —
+    // usado pra reproduzir as abas de detalhe no Excel exportado (ver
+    // lib/excelExport.js). NULL quando a extração veio de PDF/IA.
+    `ALTER TABLE analyses ADD COLUMN detail TEXT`,
+    // Rótulo do período quando mais específico que o ano (ex: "Julho de 2025",
+    // "1º Trimestre de 2025"), detectado a partir do nome do arquivo enviado ou
+    // do próprio documento (ver lib/period.js) — NULL quando só o ano é conhecido.
+    `ALTER TABLE analyses ADD COLUMN period_label TEXT`,
   ]) {
     try { await db.exec(sql); } catch { /* já aplicado ou não suportado pelo driver */ }
   }

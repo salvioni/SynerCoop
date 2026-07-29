@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { db } from './db.js';
+import { startOfMonthISO } from './date.js';
 
 export const ACTIONS = {
   CLIENT_CREATED:   'client.created',
@@ -38,4 +39,19 @@ export async function audit(req, action, { targetType, targetId, targetLabel, me
   } catch (e) {
     console.error('[audit] falha ao registrar:', e.message);
   }
+}
+
+// Conta análises criadas neste mês a partir do log de auditoria, não da
+// tabela `analyses` — uma análise criada e depois excluída no mesmo mês
+// ainda deve contar pro limite do plano e pro "análises deste mês" exibido
+// (sidebar/visão geral), então não pode ser um COUNT(*) sobre linhas que
+// podem ter sido apagadas. É a mesma consulta usada em account.js, stats.js
+// e no gate de limite do plano em routes/clients.js — centralizada aqui pra
+// nunca divergirem.
+export async function countMonthlyAnalyses(tenantId) {
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS cnt FROM audit_logs
+    WHERE tenant_id = ? AND action = ? AND created_at >= ?
+  `).get(tenantId, ACTIONS.ANALYSIS_CREATED, startOfMonthISO());
+  return row?.cnt || 0;
 }

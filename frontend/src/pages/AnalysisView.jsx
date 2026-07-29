@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile } from '../lib/api.js';
 import { useBackNavigate } from '../lib/useBackNavigate.js';
 import ConfirmModal from '../components/ConfirmModal.jsx';
+import { periodLabel, periodShort, periodSlug } from '../lib/period.js';
+import { SIGNING_ENABLED } from '../lib/constants.js';
 
 function AutoTextarea({ value, onChange, placeholder }) {
   const ref = useRef(null);
@@ -105,6 +107,7 @@ export default function AnalysisView() {
   const [loading, setLoading] = useState(true);
   const [reporting, setReporting] = useState(false);
   const [reportErr, setReportErr] = useState('');
+  const [exporting, setExporting] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [tab, setTab] = useState('geral');
   const [narrative, setNarrative] = useState(null);
@@ -141,10 +144,22 @@ export default function AnalysisView() {
       const blob = await downloadFile(`/analyses/${id}/report`);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url;
-      a.download = `relatorio_${analysis.client_name?.replace(/[^a-zA-Z0-9]/g, '_')}_${analysis.year}.docx`;
+      a.download = `relatorio_${analysis.client_name?.replace(/[^a-zA-Z0-9]/g, '_')}_${periodSlug(analysis)}.docx`;
       a.click(); URL.revokeObjectURL(url);
     } catch (e) { setReportErr(e.message || 'Erro ao baixar.'); }
     finally { setReporting(false); }
+  }
+
+  async function downloadExcel() {
+    setExporting(true); setReportErr('');
+    try {
+      const blob = await downloadFile(`/analyses/${id}/excel`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = `balanco_${analysis.client_name?.replace(/[^a-zA-Z0-9]/g, '_')}_${periodSlug(analysis)}.xlsx`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e) { setReportErr(e.message || 'Erro ao baixar.'); }
+    finally { setExporting(false); }
   }
 
   async function doDelete() {
@@ -192,16 +207,18 @@ export default function AnalysisView() {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
           <p style={{ fontSize: 14, color: 'var(--t2)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>{analysis.client_name} · Exercício {analysis.year}</span>
+            <span>{analysis.client_name} · {periodLabel(analysis)}</span>
             {!analysis.client_active && <span className="pill pill-y">Arquivado</span>}
-            <span className={`pill ${analysis.status === 'signed' ? 'pill-g' : 'pill-b'}`}>
-              {analysis.status === 'signed' ? 'Assinada' : 'Editável'}
-            </span>
+            {SIGNING_ENABLED && (
+              <span className={`pill ${analysis.status === 'signed' ? 'pill-g' : 'pill-b'}`}>
+                {analysis.status === 'signed' ? 'Assinada' : 'Editável'}
+              </span>
+            )}
           </p>
           <h1>Análise Financeira</h1>
         </div>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
-          {analysis.status === 'signed' ? (
+          {SIGNING_ENABLED && (analysis.status === 'signed' ? (
             <button className="btn" onClick={unsignAnalysis} disabled={signing}>
               {signing ? <><i className="ti ti-loader"></i> Revogando…</> : <><i className="ti ti-signature-off"></i> Revogar assinatura</>}
             </button>
@@ -209,25 +226,28 @@ export default function AnalysisView() {
             <button className="btn" onClick={signAnalysis} disabled={signing}>
               {signing ? <><i className="ti ti-loader"></i> Assinando…</> : <><i className="ti ti-signature"></i> Assinar</>}
             </button>
-          )}
+          ))}
+          <button className="btn" onClick={downloadExcel} disabled={exporting}>
+            {exporting ? <><i className="ti ti-loader"></i> Gerando…</> : <><i className="ti ti-file-spreadsheet"></i> Baixar Excel</>}
+          </button>
           <button className="btn btn-p" onClick={downloadReport} disabled={reporting}>
             {reporting ? <><i className="ti ti-loader"></i> Gerando…</> : <><i className="ti ti-file-download"></i> Baixar Relatório</>}
           </button>
           <button className="btn" onClick={() => {
             const url = window.location.href;
-            const text = `Análise financeira - ${analysis.client_name} (${analysis.year})`;
+            const text = `Análise financeira - ${analysis.client_name} (${periodShort(analysis)})`;
             if (navigator.share) { navigator.share({ title: text, url }); }
             else { navigator.clipboard.writeText(url).then(() => alert('Link copiado!')); }
           }}>
             <i className="ti ti-share"></i> Compartilhar
           </button>
-          <button className="btn" onClick={() => setConfirm({ title: 'Excluir análise?', message: `Análise ${analysis.year} será excluída.`, confirmLabel: 'Excluir', danger: true, onConfirm: doDelete })}>
+          <button className="btn" onClick={() => setConfirm({ title: 'Excluir análise?', message: `Análise de ${periodShort(analysis)} será excluída.`, confirmLabel: 'Excluir', danger: true, onConfirm: doDelete })}>
             <i className="ti ti-trash"></i>
           </button>
         </div>
       </div>
 
-      {analysis.status === 'signed' && (
+      {SIGNING_ENABLED && analysis.status === 'signed' && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: '10px 14px',
           background: 'var(--green-dim)', border: '1px solid var(--green-t)', borderRadius: 8, fontSize: 13, color: 'var(--green-t)',
@@ -283,7 +303,7 @@ export default function AnalysisView() {
           tesouraria: { title: 'Tesouraria e Capital de Giro', desc: 'Saldo financeiro disponível e necessidade de capital operacional.' },
         };
 
-        const statusLabel = (color) => ({ green: 'Bom', yellow: 'Atenção', red: 'Crítico', '': 'Neutro' }[color] || 'Neutro');
+        const statusLabel = (color) => ({ green: 'Bom', yellow: 'Atenção', red: 'Crítico', '': 'Sem dados' }[color] || 'Sem dados');
         const statusDot = (color) => ({ green: 'var(--green-t)', yellow: 'var(--yellow-t)', red: 'var(--red-t)', '': 'var(--t3)' }[color] || 'var(--t3)');
 
         const splitBullets = (text) => {
@@ -393,7 +413,7 @@ export default function AnalysisView() {
                       const color = indColor(pilar.key, k, raw);
                       const c = GC[color] || GC[''];
                       const meta = INDICATOR_META[k];
-                      const descText = (meta && raw != null) ? meta.desc(raw) : '';
+                      const descText = meta ? (raw != null ? meta.desc(raw) : 'Dado insuficiente no documento para calcular este indicador.') : '';
                       return (
                         <div key={k} className="grid-4col-indicator" style={{
                           padding: '12px 0',
@@ -510,7 +530,7 @@ export default function AnalysisView() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
             <h2 style={{ fontSize: 20 }}>Relatório de Análise</h2>
             <div style={{ display: 'flex', gap: 8 }}>
-              {narrative && analysis.status !== 'signed' && <>
+              {narrative && (!SIGNING_ENABLED || analysis.status !== 'signed') && <>
                 <button className="btn" onClick={() => editMode ? saveNarrative() : setEditMode(true)} disabled={saving}>
                   <i className={`ti ${editMode ? 'ti-check' : 'ti-edit'}`}></i>
                   {editMode ? (saving ? 'Salvando…' : 'Salvar') : 'Editar'}
@@ -531,7 +551,7 @@ export default function AnalysisView() {
           ) : <>
             <div style={{ borderBottom: '2px solid var(--blue)', paddingBottom: 12, marginBottom: 20 }}>
               <div style={{ fontFamily: 'var(--font-serif)', fontSize: 20, color: 'var(--t0)' }}>Relatório de Análise de Desempenho Financeiro</div>
-              <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 4 }}>{analysis.client_name} · Exercício {analysis.year}</div>
+              <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 4 }}>{analysis.client_name} · {periodLabel(analysis)}</div>
             </div>
 
             {REPORT_SECTIONS.map(({ key, title, heading, divider }) => {

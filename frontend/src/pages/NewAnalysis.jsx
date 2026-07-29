@@ -4,7 +4,9 @@ import { api, uploadFile, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useAccountInfo } from '../lib/accountInfo.jsx';
 import { useBackNavigate } from '../lib/useBackNavigate.js';
+import { getPlan } from '../lib/plans.js';
 import ClientFormModal from '../components/ClientFormModal.jsx';
+import ConfirmModal from '../components/ConfirmModal.jsx';
 
 const STEPS = [
   { n: 1, label: 'Cliente' },
@@ -16,9 +18,10 @@ const STEPS_SINGLE_ENTITY = STEPS.filter(s => s.n !== 1);
 export default function NewAnalysis() {
   const navigate = useNavigate();
   const { user, isSingleEntity } = useAuth();
-  const { refetch: refetchAccountInfo } = useAccountInfo();
+  const { accountInfo, refetch: refetchAccountInfo } = useAccountInfo();
   const goBack = useBackNavigate('/app/dashboard');
   const [step, setStep] = useState(isSingleEntity ? 2 : 1);
+  const [limitMsg, setLimitMsg] = useState(null);
 
   const [clients, setClients] = useState([]);
   const [clientId, setClientId] = useState(isSingleEntity ? user.self_client_id : '');
@@ -122,15 +125,50 @@ export default function NewAnalysis() {
       Object.entries(ex.dsp || {}).forEach(([k, v]) => { if (v != null) dspClean[k] = Number(v) || 0; });
       const saved = await api.post(`/clients/${clientId}/analyses`, {
         bp: bpClean, dsp: dspClean, year: ex.year || new Date().getFullYear(),
-        confidence: ex.confidence, notes: ex.notes,
+        confidence: ex.confidence, notes: ex.notes, detail: ex.detail || null,
+        period_label: ex.period_label || null,
       });
       refetchAccountInfo();
       navigate(`/app/analyses/${saved.analysis.id}`, { replace: true });
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Erro ao processar. Tente novamente.');
+      // Alguém do mesmo escritório pode ter usado a última análise do mês
+      // entre o carregamento desta tela e o clique em "Analisar arquivo" —
+      // o servidor é a fonte da verdade do limite, então tratamos esse erro
+      // à parte pra mostrar o mesmo aviso bloqueante do check antecipado
+      // abaixo, e não só um banner de erro genérico.
+      if (e instanceof ApiError && e.fields?.code === 'ANALYSIS_LIMIT_REACHED') {
+        setLimitMsg(e.message);
+        refetchAccountInfo();
+      } else {
+        setErr(e instanceof ApiError ? e.message : 'Erro ao processar. Tente novamente.');
+      }
       setProcessing(false);
       setStep(2);
     }
+  }
+
+  const plan = getPlan(accountInfo?.plan);
+  const monthlyUsed = accountInfo?.monthlyAnalyses ?? 0;
+  const limitReached = plan.limit !== Infinity && monthlyUsed >= plan.limit;
+  const blockingMsg = limitMsg || (limitReached
+    ? `Você já usou ${monthlyUsed} de ${plan.limit} análises deste mês no plano ${plan.label}. Faça upgrade para continuar ou aguarde a virada do mês.`
+    : null);
+
+  if (blockingMsg) {
+    return (
+      <div className="page-body" style={{ maxWidth: 680, margin: '0 auto', width: '100%' }}>
+        <button className="back" onClick={goBack} style={{ marginBottom: 16 }}>
+          <i className="ti ti-arrow-left"></i> Voltar
+        </button>
+        <ConfirmModal
+          title="Limite de análises atingido"
+          message={blockingMsg}
+          confirmLabel="Ver plano"
+          onConfirm={() => navigate('/app/settings')}
+          onClose={goBack}
+        />
+      </div>
+    );
   }
 
   return (
@@ -156,7 +194,7 @@ export default function NewAnalysis() {
                 color: step >= s.n ? '#fff' : 'var(--t3)',
                 border: step >= s.n ? 'none' : '1px solid var(--bd)',
               }}>
-                {step > s.n ? <i className="ti ti-check" style={{ fontSize: 16 }}></i> : s.n}
+                {step > s.n ? <i className="ti ti-check" style={{ fontSize: 16 }}></i> : i + 1}
               </div>
               <span style={{ fontSize: 14, fontWeight: step === s.n ? 500 : 400, color: step >= s.n ? 'var(--t0)' : 'var(--t3)' }}>
                 {s.label}

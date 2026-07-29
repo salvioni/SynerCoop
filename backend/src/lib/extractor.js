@@ -3,6 +3,7 @@
 import * as XLSX from 'xlsx';
 import pdfParse from 'pdf-parse';
 import { generateText, parseJsonFromLLM } from './llm.js';
+import { detectPeriodFromFilename, mergePeriod } from './period.js';
 
 const EXTRACTION_PROMPT = `Você é um especialista em contabilidade de cooperativas brasileiras.
 
@@ -12,6 +13,7 @@ Retorne SOMENTE um JSON válido com esta estrutura exata (sem texto antes ou dep
 
 {
   "year": 2024,
+  "period_label": null,
   "bp": {
     "ativo_circulante": 0,
     "caixa": 0,
@@ -73,50 +75,71 @@ Retorne SOMENTE um JSON válido com esta estrutura exata (sem texto antes ou dep
 Regras importantes:
 - Todos os valores devem ser números (sem R$, sem pontos de milhar, sem vírgulas)
 - Valores de custo/despesa devem ser NEGATIVOS (ex: custos_vendas: -500000)
-- Se não encontrar um campo, deixe 0
+- Se não encontrar um campo no documento, retorne null — NUNCA 0. O 0 acima em cada
+  campo do exemplo é só um placeholder de tipo. 0 significa "o documento informa que
+  o valor real é zero"; null significa "não encontrei essa informação no documento".
+  Tratar os dois como a mesma coisa cria viés na análise (ex: parecer que não há
+  dívida quando na verdade o dado só não estava no documento)
 - O campo "confidence" deve refletir sua confiança na extração (0 a 1)
 - Cooperativas usam "Sobras/Perdas" em vez de "Lucro/Prejuízo"
-- EBITDA = Resultado Bruto + Despesas Operacionais (sem depreciação/financeiro)`;
+- EBITDA = Resultado Bruto + Despesas Operacionais (sem depreciação/financeiro)
+- "period_label": se o cabeçalho/título do documento indicar um período mais
+  específico que o ano (ex: "Balanço Patrimonial - Julho/2025", "1º Trimestre de
+  2025"), preencha por extenso (ex: "Julho de 2025", "1º Trimestre de 2025"). O
+  documento pode ter colunas de anos anteriores só para efeito de comparação —
+  use o período do exercício PRINCIPAL sendo analisado, não o de comparação. Se
+  só um ano constar (sem mês/trimestre/bimestre/semestre), deixe null`;
 
 export async function extractFromFile(buffer, filename, companyName) {
   const lower = filename.toLowerCase();
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-    return await extractFromExcel(buffer, companyName);
+    return await extractFromExcel(buffer, filename, companyName);
   } else if (lower.endsWith('.pdf')) {
-    return await extractFromPdf(buffer, companyName);
+    return await extractFromPdf(buffer, filename, companyName);
   } else {
     throw new Error(`Formato não suportado: ${filename}. Use PDF ou Excel (.xlsx/.xls).`);
   }
 }
 
-async function extractFromExcel(buffer, companyName) {
+async function extractFromExcel(buffer, filename, companyName) {
   const wb = XLSX.read(buffer, { type: 'buffer' });
 
   // Tenta ler como planilha no formato padrão (Balanço Perguntado)
   if (wb.SheetNames.includes('BP') && wb.SheetNames.includes('DSP') && wb.SheetNames.includes('A.01')) {
-    return extractFromStandardExcel(wb);
+    return extractFromStandardExcel(wb, filename);
   }
 
   // Se não for o formato padrão, extrai texto e manda pro Claude
   const textContent = extractTextFromExcel(wb);
-  return await extractWithAI(textContent, companyName, 'Excel');
+  return await extractWithAI(textContent, companyName, 'Excel', filename);
 }
 
-function extractFromStandardExcel(wb) {
+// Inverte o sinal preservando null — "-null" viraria -0 (um valor numérico
+// real) e apagaria a informação de "não encontrado" nos campos que só
+// invertem o sinal de uma célula lida (ex: despesas, sempre negativas no
+// nosso formato) sem agregar mais nada.
+function neg(v) { return v == null ? null : -v; }
+
+function extractFromStandardExcel(wb, filename) {
+  // null = célula ausente/em branco no modelo ("não encontrado"); só retorna
+  // 0 quando a célula de fato contém o valor zero. Os dois casos não podem
+  // colapsar no mesmo retorno, senão a análise trata "sem dado" como "dívida
+  // zero" (ou qualquer outro campo) e cria viés no relatório.
   function val(sheetName, cell) {
     try {
       const ws = wb.Sheets[sheetName];
-      if (!ws) return 0;
+      if (!ws) return null;
       const c = ws[cell];
-      if (!c) return 0;
-      const v = c.v;
-      return v !== null && v !== undefined ? parseFloat(v) || 0 : 0;
+      if (!c || c.v === null || c.v === undefined) return null;
+      const n = parseFloat(c.v);
+      return Number.isNaN(n) ? null : n;
     } catch {
-      return 0;
+      return null;
     }
   }
 
-  const year = parseInt(wb.Sheets['BP']?.['E2']?.v) || new Date().getFullYear();
+  const sheetYear = parseInt(wb.Sheets['BP']?.['E2']?.v) || new Date().getFullYear();
+  const { year, period_label } = mergePeriod(sheetYear, null, detectPeriodFromFilename(filename));
 
   const caixa = val('A.01', 'G29');
   const contas_rec_cp = val('A.02', 'G33');
@@ -174,6 +197,7 @@ function extractFromStandardExcel(wb) {
 
   return {
     year,
+    period_label,
     bp: {
       ativo_circulante: ativo_circ, caixa, contas_receber_cp: contas_rec_cp,
       adiantamentos, estoques, outros_creditos_cp: outros_cp,
@@ -189,18 +213,45 @@ function extractFromStandardExcel(wb) {
       sobras_acumuladas: sobras_acum, total_passivo_pl: total_ativo,
     },
     dsp: {
-      receita_bruta, devolucoes: -devolucoes, impostos_venda: -impostos_venda,
+      receita_bruta, devolucoes: neg(devolucoes), impostos_venda: neg(impostos_venda),
       receita_liquida, custos_vendas, resultado_bruto,
-      despesas_comerciais: -desp_comerc, despesas_pessoal: -desp_pessoal,
-      despesas_administrativas: -desp_admin, despesas_tributarias: -desp_trib,
-      outros_receitas_operacionais: outros_rec_op, outros_despesas_operacionais: -outros_desp_op,
-      despesas_operacionais: desp_op, ebitda, depreciacao: -depreciacao,
-      receitas_financeiras: rec_fin, despesas_financeiras: -desp_fin,
-      resultado_antes_ir, ir_csll: -ir_csll, sobras_perdas: sobras,
+      despesas_comerciais: neg(desp_comerc), despesas_pessoal: neg(desp_pessoal),
+      despesas_administrativas: neg(desp_admin), despesas_tributarias: neg(desp_trib),
+      outros_receitas_operacionais: outros_rec_op, outros_despesas_operacionais: neg(outros_desp_op),
+      despesas_operacionais: desp_op, ebitda, depreciacao: neg(depreciacao),
+      receitas_financeiras: rec_fin, despesas_financeiras: neg(desp_fin),
+      resultado_antes_ir, ir_csll: neg(ir_csll), sobras_perdas: sobras,
     },
     confidence: 1.0,
     notes: 'Extraído do formato padrão Balanço Perguntado',
+    detail: extractDetailSheets(wb),
   };
+}
+
+// Captura as células de entrada (sem fórmula) das abas de detalhe A.xx/P.xx/C.xx
+// — é o questionário granular por trás dos totais do BP/DSP (conta bancária
+// por conta, aging de títulos, cooperado x não-cooperado etc.). Guardado
+// como {aba: {célula: valor}} pra poder ser replantado célula-a-célula num
+// exemplar novo do mesmo modelo na hora de exportar (ver lib/excelExport.js)
+// — só faz sentido porque o arquivo de origem já é esse modelo padrão.
+function extractDetailSheets(wb) {
+  const detail = {};
+  for (const sheetName of wb.SheetNames) {
+    if (['BP', 'DSP', 'INDICADORES'].includes(sheetName)) continue;
+    const ws = wb.Sheets[sheetName];
+    if (!ws || !ws['!ref']) continue;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const cells = {};
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (cell && !cell.f && typeof cell.v === 'number') cells[addr] = cell.v;
+      }
+    }
+    if (Object.keys(cells).length) detail[sheetName] = cells;
+  }
+  return detail;
 }
 
 function extractTextFromExcel(wb) {
@@ -239,7 +290,7 @@ function extractFinancialSection(text) {
   return null;
 }
 
-async function extractFromPdf(buffer, companyName) {
+async function extractFromPdf(buffer, filename, companyName) {
   let fullText = '';
   try {
     const data = await pdfParse(buffer);
@@ -254,12 +305,13 @@ async function extractFromPdf(buffer, companyName) {
 
   console.log(`[extract-pdf] Total: ${fullText.length} chars, Enviando: ${textToSend.length} chars, Seção financeira: ${financialSection ? 'sim' : 'não'}`);
 
-  return await extractWithAI(textToSend, companyName, 'PDF');
+  return await extractWithAI(textToSend, companyName, 'PDF', filename);
 }
 
-async function extractWithAI(textContent, companyName, sourceType) {
+async function extractWithAI(textContent, companyName, sourceType, filename) {
   const prompt = `Empresa: ${companyName}
 Tipo de arquivo: ${sourceType}
+Nome do arquivo: ${filename || '(desconhecido)'}
 
 Documento financeiro:
 ${textContent}
@@ -274,7 +326,9 @@ ${EXTRACTION_PROMPT}`;
   raw = raw.replace(/\/\/.*/g, '');
 
   try {
-    return parseJsonFromLLM(raw);
+    const result = parseJsonFromLLM(raw);
+    const merged = mergePeriod(result.year, result.period_label, detectPeriodFromFilename(filename));
+    return { ...result, ...merged };
   } catch (e) {
     console.error('[extractor] JSON inválido da IA. Primeiros 500 chars:', raw.substring(0, 500));
     throw new Error('A IA retornou dados em formato inválido. Tente novamente.');

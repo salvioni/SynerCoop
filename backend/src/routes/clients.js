@@ -4,13 +4,31 @@ import multer from 'multer';
 import { db } from '../lib/db.js';
 import { authRequired } from '../middleware/auth.js';
 import { badRequest, trim } from '../lib/validate.js';
-import { audit, ACTIONS } from '../lib/audit.js';
+import { audit, ACTIONS, countMonthlyAnalyses } from '../lib/audit.js';
 import logger from '../lib/logger.js';
 import { extractFromFile } from '../lib/extractor.js';
 import { calculateIndicators } from '../lib/calculator.js';
 import { generateAnalysisNarrative } from '../lib/narrative.js';
 import { PLAN_LIMITS } from '../lib/plans.js';
-import { startOfMonthISO } from '../lib/date.js';
+
+// Barra tanto a extração (que já custa uma chamada de IA) quanto o salvamento
+// final da análise quando o tenant já bateu o limite mensal do plano — sem
+// isso, alguém no limite ainda queimaria uma extração inteira só pra
+// descobrir no passo seguinte que não podia salvar. `code` segue a mesma
+// convenção de `fields.code` já usada em PLAN_REQUIRED (ver lib/api.js no
+// frontend) pra a UI reagir sem depender do texto da mensagem.
+async function assertUnderMonthlyLimit(tenantId) {
+  const tenant = await db.prepare('SELECT plan FROM tenants WHERE id = ?').get(tenantId);
+  const limit = PLAN_LIMITS[tenant?.plan] ?? PLAN_LIMITS.trial;
+  if (limit === Infinity) return;
+  const monthly = await countMonthlyAnalyses(tenantId);
+  if (monthly >= limit) {
+    throw badRequest(
+      `Limite de ${limit} análises/mês atingido no plano ${(tenant?.plan || 'trial').toUpperCase()}. Faça upgrade para continuar.`,
+      { code: 'ANALYSIS_LIMIT_REACHED' }
+    );
+  }
+}
 
 const ALLOWED_MIMES = new Set([
   'application/pdf',
@@ -117,8 +135,8 @@ router.get('/:id', async (req, res, next) => {
     if (!client) throw badRequest('Cliente não encontrado.');
 
     const analyses = await db.prepare(`
-      SELECT id, year, status, confidence, bp, dsp, indicators, created_at, updated_at, signed_at, signed_by
-      FROM analyses WHERE client_id = ? ORDER BY year DESC
+      SELECT id, year, period_label, status, confidence, bp, dsp, indicators, created_at, updated_at, signed_at, signed_by
+      FROM analyses WHERE client_id = ? ORDER BY year DESC, created_at DESC
     `).all(req.params.id);
 
     res.json({ client, analyses });
@@ -186,6 +204,7 @@ router.post('/:id/extract', upload.single('file'), async (req, res, next) => {
       .get(req.params.id, req.user.tenant_id);
     if (!client) throw badRequest('Cliente não encontrado.');
     if (!req.file) throw badRequest('Nenhum arquivo enviado.');
+    await assertUnderMonthlyLimit(req.user.tenant_id);
 
     const extracted = await extractFromFile(req.file.buffer, req.file.originalname, client.name);
     logger.info({ file: req.file.originalname, confidence: extracted.confidence, total_ativo: extracted.bp?.total_ativo, receita_liquida: extracted.dsp?.receita_liquida }, 'extract');
@@ -199,37 +218,29 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
     const client = await db.prepare('SELECT * FROM clients WHERE id = ? AND tenant_id = ?')
       .get(req.params.id, req.user.tenant_id);
     if (!client) throw badRequest('Cliente não encontrado.');
+    await assertUnderMonthlyLimit(req.user.tenant_id);
 
-    const tenant = await db.prepare('SELECT plan FROM tenants WHERE id = ?').get(req.user.tenant_id);
-    const limit = PLAN_LIMITS[tenant?.plan] ?? PLAN_LIMITS.trial;
-    if (limit !== Infinity) {
-      const monthly = await db.prepare(`
-        SELECT COUNT(*) AS cnt FROM analyses a
-        JOIN clients c ON c.id = a.client_id
-        WHERE c.tenant_id = ? AND a.created_at >= ?
-      `).get(req.user.tenant_id, startOfMonthISO());
-      if ((monthly?.cnt || 0) >= limit) {
-        throw badRequest(`Limite de ${limit} análises/mês atingido no plano ${(tenant?.plan || 'trial').toUpperCase()}. Faça upgrade para continuar.`);
-      }
-    }
-
-    let bpData, dspData, year, confidence, notes;
+    let bpData, dspData, year, periodLabel, confidence, notes, detailData;
 
     if (req.file) {
       const extracted = await extractFromFile(req.file.buffer, req.file.originalname, client.name);
       bpData = extracted.bp;
       dspData = extracted.dsp;
       year = extracted.year;
+      periodLabel = extracted.period_label || null;
       confidence = extracted.confidence;
       notes = extracted.notes;
+      detailData = extracted.detail;
     } else if (req.body?.bp && req.body?.dsp) {
       try {
         bpData = typeof req.body.bp === 'string' ? JSON.parse(req.body.bp) : req.body.bp;
         dspData = typeof req.body.dsp === 'string' ? JSON.parse(req.body.dsp) : req.body.dsp;
+        detailData = req.body.detail ? (typeof req.body.detail === 'string' ? JSON.parse(req.body.detail) : req.body.detail) : null;
       } catch {
         throw badRequest('Dados bp/dsp inválidos (JSON malformado).');
       }
       year = parseInt(req.body?.year) || new Date().getFullYear();
+      periodLabel = trim(req.body?.period_label) || null;
       confidence = parseFloat(req.body?.confidence) || null;
       notes = trim(req.body?.notes) || null;
     } else {
@@ -238,8 +249,15 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
 
     const indicators = calculateIndicators({ bp: bpData, dsp: dspData });
 
-    const dup = await db.prepare('SELECT id FROM analyses WHERE client_id = ? AND year = ?').get(client.id, year);
-    if (dup) throw badRequest(`Já existe uma análise para o ano ${year} deste cliente.`, { year: 'Ano já analisado.' });
+    // Um "ano" pode ter várias análises quando o período é mais granular (ex:
+    // Julho de 2025 e Agosto de 2025 no mesmo ano) — o que não pode repetir é
+    // o mesmo período exato pro mesmo cliente. period_label NULL (só ano) é
+    // tratado como seu próprio período, então só bloqueia duplicar o ano
+    // "cheio", não bloqueia um mês/trimestre específico dentro dele.
+    const dup = await db.prepare(
+      'SELECT id FROM analyses WHERE client_id = ? AND year = ? AND (period_label = ? OR (period_label IS NULL AND ? IS NULL))'
+    ).get(client.id, year, periodLabel, periodLabel);
+    if (dup) throw badRequest(`Já existe uma análise para ${periodLabel || `o ano ${year}`} deste cliente.`, { year: 'Período já analisado.' });
 
     const id = nanoid(10);
 
@@ -256,9 +274,9 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
     }
 
     await db.prepare(`
-      INSERT INTO analyses (id, client_id, year, bp, dsp, indicators, confidence, notes, narrative, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'editable', ?)
-    `).run(id, client.id, year, JSON.stringify(bpData), JSON.stringify(dspData), JSON.stringify(indicators), confidence, notes, narrative ? JSON.stringify(narrative) : null, req.user.id);
+      INSERT INTO analyses (id, client_id, year, bp, dsp, indicators, confidence, notes, narrative, status, created_by, detail, period_label)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'editable', ?, ?, ?)
+    `).run(id, client.id, year, JSON.stringify(bpData), JSON.stringify(dspData), JSON.stringify(indicators), confidence, notes, narrative ? JSON.stringify(narrative) : null, req.user.id, detailData ? JSON.stringify(detailData) : null, periodLabel);
 
     const analysis = await db.prepare('SELECT * FROM analyses WHERE id = ?').get(id);
     await audit(req, ACTIONS.ANALYSIS_CREATED, { targetType: 'analysis', targetId: id, targetLabel: `${client.name} ${year}` });

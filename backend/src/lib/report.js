@@ -89,7 +89,16 @@ Regras:
 - Cooperativas usam "sobras/perdas" em vez de "lucro/prejuízo", "ingressos" em vez de "receita"
 - Seja específico: cite os valores exatos dos indicadores
 - Identifique claramente o que é positivo, o que é preocupante e o que é crítico
-- As recomendações devem ser práticas e acionáveis`;
+- As recomendações devem ser práticas e acionáveis
+- Campos com valor null (nos INDICADORES/VALORES DO BALANÇO PATRIMONIAL/DSP acima)
+  não foram encontrados no documento original — é diferente de valer zero. NUNCA
+  afirme que esses campos valem zero ou que "não há" o que quer que seja com base
+  neles (ex: não diga "a cooperativa não tem empréstimos" se o campo é null — diga
+  que a informação não estava disponível no documento, ou simplesmente não cite esse valor)
+- Se a maioria dos indicadores vier null, isso significa que o documento não tinha
+  dados suficientes para a análise — NÃO invente uma narrativa (ex: "a cooperativa
+  está inativa/foi dissolvida"). Nesse caso, o sumário executivo deve dizer
+  objetivamente que os dados disponíveis são insuficientes para uma análise completa`;
 
 async function generateNarrative(companyName, companyType, year, indicators, bp, dsp) {
   const prompt = REPORT_PROMPT
@@ -154,7 +163,7 @@ function makeSwotCell(label, text, bgHex, colorHex) {
   });
 }
 
-async function buildDocx(companyName, companyType, year, narrative, logo, signature) {
+async function buildDocx(companyName, companyType, year, narrative, logo, signature, periodLabel) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('pt-BR');
   const logoImage = buildLogoImage(logo);
@@ -171,7 +180,7 @@ async function buildDocx(companyName, companyType, year, narrative, logo, signat
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: `${companyName}  •  Exercício ${year}`, size: 24, color: GRAY })],
+      children: [new TextRun({ text: `${companyName}  •  ${periodLabel || `Exercício ${year}`}`, size: 24, color: GRAY })],
       spacing: { after: 60 },
     }),
     new Paragraph({
@@ -308,7 +317,7 @@ async function buildDocx(companyName, companyType, year, narrative, logo, signat
   return await Packer.toBuffer(doc);
 }
 
-export async function generateReport(companyName, companyType, year, indicators, bp, dsp, existingNarrative, logo, signature) {
+export async function generateReport(companyName, companyType, year, indicators, bp, dsp, existingNarrative, logo, signature, periodLabel) {
   const narrative = existingNarrative || await generateNarrative(companyName, companyType, year, indicators, bp, dsp);
-  return buildDocx(companyName, companyType, year, narrative, logo, signature);
+  return buildDocx(companyName, companyType, year, narrative, logo, signature, periodLabel);
 }

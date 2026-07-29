@@ -46,11 +46,13 @@ describe('calculateIndicators', () => {
     expect(result.tesouraria.capital_giro_pct).toBeCloseTo(0.2);
   });
 
-  it('não lança exceção e usa 0 como padrão quando bp/dsp estão totalmente ausentes', () => {
+  it('não lança exceção e retorna null (não 0) quando bp/dsp estão totalmente ausentes', () => {
+    // null é o sinal de "sem dado suficiente pra calcular" (ver extractor.js)
+    // — um indicador "0" pareceria um fato real (ex: 0% de endividamento).
     const result = calculateIndicators({});
-    expect(result.liquidez.liquidez_corrente).toBe(0);
-    expect(result.endividamento.endividamento_total_pct).toBe(0);
-    expect(result.tesouraria.capital_giro).toBe(0);
+    expect(result.liquidez.liquidez_corrente).toBeNull();
+    expect(result.endividamento.endividamento_total_pct).toBeNull();
+    expect(result.tesouraria.capital_giro).toBeNull();
   });
 
   it('divisão por zero cai no valor padrão em vez de Infinity/NaN', () => {

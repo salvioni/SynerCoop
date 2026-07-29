@@ -4,11 +4,13 @@ import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { api, uploadFile, ApiError } from '../lib/api.js';
 import { getPlan } from '../lib/plans.js';
+import { TENANT_TYPES } from '../lib/constants.js';
 import UserAvatar, { AVATAR_COLORS } from '../components/UserAvatar.jsx';
 import ConfirmModal from '../components/ConfirmModal.jsx';
 
 export default function Settings() {
   const { user, refresh } = useAuth();
+  const tenantType = TENANT_TYPES.find(t => t.value === user?.tenant_type) || TENANT_TYPES.find(t => t.value === 'escritorio');
   const { theme, setTheme } = useTheme();
   const location = useLocation();
   const [info, setInfo] = useState(null);
@@ -331,7 +333,7 @@ export default function Settings() {
       <form onSubmit={saveOffice}>
       <section id="escritorio" style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', margin: 0 }}>Escritório</h2>
+          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', margin: 0 }}>{tenantType.label}</h2>
           {!editOffice
             ? <button type="button" className="btn" onClick={startEdit}><i className="ti ti-edit"></i> Editar</button>
             : <div style={{ display: 'flex', gap: 8 }}>
@@ -342,7 +344,7 @@ export default function Settings() {
         </div>
 
         <div style={{ marginBottom: 20 }}>
-          <span className="inp-label">Logo do escritório</span>
+          <span className="inp-label">Logo {tenantType.article} {tenantType.label.toLowerCase()}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: 10 }}>
             <div style={{
               position: 'relative', width: 64, height: 64, flexShrink: 0,

@@ -2,6 +2,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { useAccountInfo } from '../lib/accountInfo.jsx';
 import { getPlan } from '../lib/plans.js';
+import { TENANT_TYPES } from '../lib/constants.js';
 import UserAvatar from '../components/UserAvatar.jsx';
 
 export default function AppShell() {
@@ -10,6 +11,7 @@ export default function AppShell() {
   const { accountInfo } = useAccountInfo();
   if (!user) return null;
   const plan = getPlan(accountInfo?.plan || user.plan);
+  const tenantTypeLabel = TENANT_TYPES.find(t => t.value === user.tenant_type)?.label;
   const monthly = accountInfo?.monthlyAnalyses ?? 0;
   const pctUsed = plan.limit === Infinity ? 0 : Math.min(100, Math.round((monthly / plan.limit) * 100));
   function doLogout() { logout(); navigate('/login', { replace: true }); }
@@ -26,7 +28,7 @@ export default function AppShell() {
         </div>
 
         <div className="s-office">
-          <div className="s-office-label">Escritório</div>
+          <div className="s-office-label">{tenantTypeLabel || 'Escritório'}</div>
           <div className="s-office-name">{user.tenant_name || 'Meu Escritório'}</div>
           <div className="s-office-plan">Plano {plan.label}</div>
         </div>
@@ -77,7 +79,6 @@ export default function AppShell() {
             <UserAvatar user={user} size={36} />
             <div className="s-uname">
               <div className="s-uname-name">{user.name}</div>
-              <div className="s-uname-email">{user.email}</div>
             </div>
             <button className="s-logout" onClick={doLogout} title="Sair">
               <i className="ti ti-logout" aria-hidden="true"></i>
