@@ -16,10 +16,40 @@ let driverName;
 if (USE_PG) {
   // ───── Postgres ─────
   const pgMod = await import('pg');
-  const { Pool } = pgMod.default || pgMod;
+  const { Pool, types } = pgMod.default || pgMod;
+
+  // COUNT()/SUM() em Postgres voltam como bigint (OID 20) e o driver os
+  // entrega como STRING para não perder precisão acima de 2^53. Sem isso,
+  // /stats e /account devolveriam {"activeClients":"1"} em produção e
+  // {"activeClients":1} em dev (SQLite) — divergência que quebra qualquer
+  // soma no frontend ("1" + 1 === "11"). Nenhum contador deste sistema chega
+  // perto de 2^53, então converter para Number é seguro e alinha os drivers.
+  types.setTypeParser(20, v => (v === null ? null : Number(v)));
+
+  // SSL é obrigatório nos Postgres gerenciados (Supabase, Render, Neon, RDS),
+  // mas quebra num Postgres local/Docker que não expõe TLS. Decidido pela URL
+  // em vez de hardcoded, para o mesmo código servir os dois ambientes:
+  //   • ?sslmode=disable na URL  ou  PGSSLMODE=disable  → desliga
+  //   • host local (localhost/127.0.0.1/::1)            → desliga
+  //   • qualquer outro host                             → liga
+  // rejectUnauthorized:false porque esses provedores usam certificado próprio.
+  function resolveSsl(url) {
+    if (process.env.PGSSLMODE === 'disable') return false;
+    let host = '';
+    let sslmode = '';
+    try {
+      const u = new URL(url);
+      host = u.hostname;
+      sslmode = u.searchParams.get('sslmode') || '';
+    } catch { /* URL fora do padrão — cai no default seguro (com SSL) */ }
+    if (sslmode === 'disable') return false;
+    if (['localhost', '127.0.0.1', '::1', ''].includes(host)) return false;
+    return { rejectUnauthorized: false };
+  }
+
   const pool = new Pool({
     connectionString: DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
+    ssl: resolveSsl(DATABASE_URL),
     max: 10,
     idleTimeoutMillis: 30_000
   });

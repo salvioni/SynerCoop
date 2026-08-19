@@ -27,6 +27,11 @@ REGRAS IMPORTANTES (leia antes de ver a estrutura):
 - Cooperativas usam "Sobras/Perdas" em vez de "Lucro/Prejuízo"
 - EBITDA = Resultado Bruto + Despesas Operacionais (sem depreciação e sem resultado financeiro)
 - "confidence": sua confiança geral na extração (0.0 a 1.0)
+- "year": o exercício fiscal que o documento representa — o ANO em que o período contábil ENCERROU.
+  NÃO o ano em que o documento foi preparado, assinado, aprovado ou impresso.
+  "Balanço em 31/12/2024" → year: 2024, mesmo que o rodapé ou carimbo mostrem uma data de 2025.
+  "Exercício social encerrado em 31 de dezembro de 2024" → year: 2024.
+  Se o documento tiver colunas comparativas de anos diferentes, use o exercício MAIS RECENTE.
 - "period_label": se o cabeçalho indicar período mais específico que o ano (ex: "Julho/2025",
   "1º Trimestre de 2025"), preencha por extenso. Se houver colunas de comparação com anos
   anteriores, use o exercício PRINCIPAL, não o de comparação. Se só o ano constar, deixe null.

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile } from '../lib/api.js';
 import { useBackNavigate } from '../lib/useBackNavigate.js';
 import ConfirmModal from '../components/ConfirmModal.jsx';
+import InfoTooltip from '../components/InfoTooltip.jsx';
 import { periodLabel, periodShort, periodSlug } from '../lib/period.js';
 import { SIGNING_ENABLED } from '../lib/constants.js';
 
@@ -63,6 +64,55 @@ const SCORECARD = [
   { key: 'capacidade_operacional', label: 'Cap. Operacional', icon: 'ti-refresh' },
   { key: 'tesouraria', label: 'Tesouraria', icon: 'ti-building-bank' },
 ];
+
+// ── Textos de tooltip para indicadores, BP e DSP ────────────────────────────
+const INDICATOR_TOOLTIP = {
+  liquidez_corrente: 'Mostra quantos reais a cooperativa tem disponível para cada R$1 de dívida de curto prazo. Benchmark saudável: acima de 1,20.',
+  liquidez_geral: 'Relaciona todos os ativos com todas as obrigações. Acima de 1,00 indica que a cooperativa pode honrar todas as dívidas.',
+  liquidez_seca: 'Igual à Liquidez Corrente, mas exclui estoques — mede a capacidade de pagar dívidas sem depender de vendas. Benchmark: ≥ 1,00.',
+  imobilizacao_recursos_proprios: 'Percentual do Patrimônio Líquido investido em bens fixos. Acima de 80% indica dependência de capital de terceiros.',
+  ebitda: 'Resultado operacional antes de juros, impostos e depreciação — proxy da geração de caixa da operação. Quanto maior, melhor.',
+  rentabilidade_pl_pct: 'Retorno sobre o Patrimônio Líquido (ROE). Indica quanto a cooperativa gerou para cada real investido pelos sócios. Benchmark: ≥ Selic.',
+  rentabilidade_ativos_pct: 'Retorno sobre os Ativos (ROA). Mede a eficiência na geração de resultado em relação ao total investido. Benchmark: > 5%.',
+  rentabilidade_ingressos_pct: 'Margem Líquida — percentual que sobra de cada real de receita após todos os custos. Benchmark: > 5%.',
+  endividamento_total_pct: 'Percentual dos ativos financiados por terceiros. Abaixo de 50% indica estrutura financeira saudável.',
+  perfil_endividamento_pct: 'Proporção da dívida total que vence no curto prazo. Quanto menor, menor a pressão imediata sobre o caixa. Benchmark: < 50%.',
+  nivel_alavancagem_ebitda: 'Anos necessários para pagar toda a dívida com o EBITDA atual. Abaixo de 3× é considerado saudável.',
+  pmr: 'Prazo Médio de Recebimento — quantos dias a cooperativa leva para receber suas vendas. Benchmark: < 90 dias.',
+  pme: 'Prazo Médio de Estoques — quantos dias o estoque fica parado antes de ser vendido. Benchmark: < 60 dias.',
+  pmp: 'Prazo Médio de Pagamento — quantos dias a cooperativa tem para pagar seus fornecedores. Quanto maior, melhor para o caixa. Benchmark: > 30 dias.',
+  ciclo_financeiro: 'Tempo que a cooperativa precisa financiar sua operação com capital próprio ou de terceiros. Benchmark: < 60 dias.',
+  giro_ativo: 'Eficiência dos ativos na geração de receita — quanto de receita é gerado para cada real de ativo. Benchmark: > 0,5.',
+  capital_giro: 'Diferença entre Ativo Circulante e Passivo Circulante. Positivo indica que a cooperativa financia parte do giro com recursos próprios.',
+  ncg: 'Necessidade de Capital de Giro — quanto de capital a operação precisa para funcionar. Negativo indica que a operação se autofinancia.',
+  tesouraria: 'Diferença entre Capital de Giro e NCG. Positivo indica fôlego financeiro; negativo indica dependência de financiamento de curto prazo.',
+  independencia_financeira: 'Percentual dos ativos financiados pelo Patrimônio Líquido. Acima de 0,5 indica boa independência financeira.',
+};
+
+const BP_TOOLTIP = {
+  ativo_circulante: 'Bens e direitos conversíveis em caixa em até 12 meses: disponibilidades, recebíveis, estoques, etc.',
+  disponibilidades: 'Caixa, bancos e aplicações de liquidez imediata.',
+  clientes: 'Valores a receber de clientes e cooperados pelas vendas ou serviços prestados.',
+  estoques: 'Mercadorias, produtos e insumos disponíveis para venda ou uso na produção.',
+  ativo_nao_circulante: 'Bens e direitos de longo prazo: imóveis, máquinas, equipamentos, investimentos estratégicos, etc.',
+  ativo_permanente: 'Imóveis, veículos, máquinas e outros bens utilizados na atividade por mais de 12 meses.',
+  total_ativo: 'Soma de todos os bens e direitos da cooperativa — total de recursos disponíveis.',
+  passivo_circulante: 'Obrigações que vencem em até 12 meses: fornecedores, empréstimos de curto prazo, tributos, etc.',
+  passivo_nao_circulante: 'Dívidas e obrigações com vencimento após 12 meses: financiamentos de longo prazo, provisões, etc.',
+  patrimonio_liquido: 'Recursos dos próprios sócios/cooperados: capital social, reservas e sobras acumuladas.',
+  total_passivo_pl: 'Soma de todas as fontes de recursos (dívidas + capital próprio). Deve ser igual ao Total do Ativo.',
+};
+
+const DSP_TOOLTIP = {
+  ingressos: 'Valor total das vendas ou serviços prestados antes de qualquer dedução (Receita Bruta).',
+  receita_liquida: 'Receita após deduções como impostos sobre vendas, devoluções e abatimentos. Base de cálculo para as margens.',
+  cmv: 'Custo das Mercadorias Vendidas ou da Mão de Obra — gastos diretamente ligados ao produto ou serviço entregue.',
+  lucro_bruto: 'Receita Líquida menos o CMV — margem antes das despesas operacionais.',
+  despesas_operacionais: 'Gastos com administração, vendas e outras despesas necessárias para manter a operação.',
+  ebitda: 'Resultado operacional antes de juros, impostos e depreciação — mede a geração de caixa da operação pura.',
+  resultado_antes_ir: 'Resultado da cooperativa antes da incidência do Imposto de Renda e Contribuição Social.',
+  sobras: 'Resultado final do período. Positivo (sobras) indica eficiência; negativo (perdas) indica que os gastos superaram as receitas.',
+};
 
 function scoreGrade(key, ind) {
   const d = ind?.[key] || {};
@@ -382,7 +432,7 @@ export default function AnalysisView() {
                 <div key={label} style={{ padding: '14px 16px', borderRadius: 10, background: c.bg, border: `1px solid ${c.bd}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
                     <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: 'var(--t0)' }}>{val}</div>
+                    <div className="display-val-md" style={{ color: 'var(--t0)' }}>{val}</div>
                   </div>
                   <span style={{ fontSize: 12, fontWeight: 500, color: c.t, padding: '3px 10px', borderRadius: 100, background: c.bg, border: `1px solid ${c.bd}` }}>
                     <span style={{ width: 6, height: 6, borderRadius: 99, background: statusDot(color), display: 'inline-block', marginRight: 5, verticalAlign: 'middle' }}></span>{statusLabel(color)}
@@ -424,7 +474,7 @@ export default function AnalysisView() {
                             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t0)' }}>{label}</div>
                             {meta && <div style={{ fontSize: 12, color: 'var(--t3)', marginTop: 2 }}>Benchmark: {meta.benchmark}</div>}
                           </div>
-                          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 28, fontWeight: 500, color: 'var(--t0)', textAlign: 'center' }}>
+                          <div className="display-val-lg" style={{ color: 'var(--t0)', textAlign: 'center' }}>
                             {f(raw, fn)}
                           </div>
                           <div style={{ textAlign: 'center' }}>
@@ -500,7 +550,7 @@ export default function AnalysisView() {
                 const prBg = i < 2 ? 'rgba(208,29,33,.08)' : 'rgba(235,136,31,.08)';
                 return (
                   <div key={i} style={{ padding: '24px 0', borderTop: i > 0 ? '1px solid var(--bd)' : 'none', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 32, color: 'var(--t3)', lineHeight: 1, flexShrink: 0, width: 40, textAlign: 'right' }}>
+                    <div className="display-num" style={{ color: 'var(--t3)' }}>
                       {String(i + 1).padStart(2, '0')}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -539,6 +589,12 @@ export default function AnalysisView() {
                 {editMode && <button className="btn" onClick={() => setEditMode(false)}>Cancelar</button>}
               </>}
             </div>
+          </div>
+
+          {/* Aviso IA */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', background: 'var(--gold-dim)', border: '1px solid var(--gold)', borderRadius: 8, marginBottom: 20, fontSize: 13, color: 'var(--t1)' }}>
+            <i className="ti ti-sparkles" style={{ color: 'var(--gold)', fontSize: 16, marginTop: 1, flexShrink: 0 }} />
+            <span>Este relatório foi gerado por inteligência artificial com base nos dados inseridos. <strong>Revise o conteúdo antes de utilizá-lo</strong> — o sistema pode cometer erros ou omissões.</span>
           </div>
 
           {!narrative ? (
@@ -616,7 +672,7 @@ export default function AnalysisView() {
                       const sl = { green: 'Bom', yellow: 'Atenção', red: 'Crítico', '': '—' }[color] || '—';
                       return (
                         <tr key={k}>
-                          <td>{label}</td>
+                          <td style={{ display: 'flex', alignItems: 'center' }}>{label}{INDICATOR_TOOLTIP[k] && <InfoTooltip text={INDICATOR_TOOLTIP[k]} />}</td>
                           <td className="r">{f(raw, fn)}</td>
                           <td style={{ textAlign: 'right' }}>
                             <span style={{ fontSize: 12, fontWeight: 500, color: c.t, padding: '3px 10px', borderRadius: 100, background: c.bg, display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: 99, background: c.t, flexShrink: 0 }}></span>{sl}</span>
@@ -642,13 +698,13 @@ export default function AnalysisView() {
             <div className="table-scroll"><table className="fin-table">
               <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
               <tbody>
-                <tr className="ft-group"><td>Ativo Circulante</td><td className="r">{fmtT(bp.ativo_circulante)}</td><td className="pct">{avPct(bp.ativo_circulante, totalAtivo)}</td></tr>
-                {bp.disponibilidades != null && <tr className="ft-sub"><td>Disponibilidades</td><td className="r">{fmtT(bp.disponibilidades)}</td><td className="pct">{avPct(bp.disponibilidades, totalAtivo)}</td></tr>}
-                {bp.clientes != null && <tr className="ft-sub"><td>Clientes / Recebíveis</td><td className="r">{fmtT(bp.clientes)}</td><td className="pct">{avPct(bp.clientes, totalAtivo)}</td></tr>}
-                {bp.estoques != null && <tr className="ft-sub"><td>Estoques</td><td className="r">{fmtT(bp.estoques)}</td><td className="pct">{avPct(bp.estoques, totalAtivo)}</td></tr>}
-                <tr className="ft-group"><td>Ativo Não Circulante</td><td className="r">{fmtT(ancTotal)}</td><td className="pct">{avPct(ancTotal, totalAtivo)}</td></tr>
-                {bp.ativo_permanente != null && <tr className="ft-sub"><td>Ativo Permanente</td><td className="r">{fmtT(bp.ativo_permanente)}</td><td className="pct">{avPct(bp.ativo_permanente, totalAtivo)}</td></tr>}
-                <tr className="ft-total"><td>TOTAL DO ATIVO</td><td className="r">{fmtT(bp.total_ativo)}</td><td className="pct">100,0%</td></tr>
+                <tr className="ft-group"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Ativo Circulante<InfoTooltip text={BP_TOOLTIP.ativo_circulante} /></span></td><td className="r">{fmtT(bp.ativo_circulante)}</td><td className="pct">{avPct(bp.ativo_circulante, totalAtivo)}</td></tr>
+                {bp.disponibilidades != null && <tr className="ft-sub"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Disponibilidades<InfoTooltip text={BP_TOOLTIP.disponibilidades} /></span></td><td className="r">{fmtT(bp.disponibilidades)}</td><td className="pct">{avPct(bp.disponibilidades, totalAtivo)}</td></tr>}
+                {bp.clientes != null && <tr className="ft-sub"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Clientes / Recebíveis<InfoTooltip text={BP_TOOLTIP.clientes} /></span></td><td className="r">{fmtT(bp.clientes)}</td><td className="pct">{avPct(bp.clientes, totalAtivo)}</td></tr>}
+                {bp.estoques != null && <tr className="ft-sub"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Estoques<InfoTooltip text={BP_TOOLTIP.estoques} /></span></td><td className="r">{fmtT(bp.estoques)}</td><td className="pct">{avPct(bp.estoques, totalAtivo)}</td></tr>}
+                <tr className="ft-group"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Ativo Não Circulante<InfoTooltip text={BP_TOOLTIP.ativo_nao_circulante} /></span></td><td className="r">{fmtT(ancTotal)}</td><td className="pct">{avPct(ancTotal, totalAtivo)}</td></tr>
+                {bp.ativo_permanente != null && <tr className="ft-sub"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Ativo Permanente<InfoTooltip text={BP_TOOLTIP.ativo_permanente} /></span></td><td className="r">{fmtT(bp.ativo_permanente)}</td><td className="pct">{avPct(bp.ativo_permanente, totalAtivo)}</td></tr>}
+                <tr className="ft-total"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>TOTAL DO ATIVO<InfoTooltip text={BP_TOOLTIP.total_ativo} /></span></td><td className="r">{fmtT(bp.total_ativo)}</td><td className="pct">100,0%</td></tr>
               </tbody>
             </table></div>
           </div>
@@ -659,10 +715,10 @@ export default function AnalysisView() {
             <div className="table-scroll"><table className="fin-table">
               <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
               <tbody>
-                <tr className="ft-group"><td>Passivo Circulante</td><td className="r">{fmtT(bp.passivo_circulante)}</td><td className="pct">{avPct(bp.passivo_circulante, totalAtivo)}</td></tr>
-                {(bp.total_passivo_nao_circulante ?? bp.passivo_nao_circulante ?? bp.passivo_exigivel_lp) != null && (() => { const pnc = bp.total_passivo_nao_circulante ?? bp.passivo_nao_circulante ?? bp.passivo_exigivel_lp; return <tr className="ft-group"><td>Passivo Não Circulante</td><td className="r">{fmtT(pnc)}</td><td className="pct">{avPct(pnc, totalAtivo)}</td></tr>; })()}
-                <tr className="ft-group"><td>Patrimônio Líquido</td><td className="r">{fmtT(bp.patrimonio_liquido)}</td><td className="pct">{avPct(bp.patrimonio_liquido, totalAtivo)}</td></tr>
-                <tr className="ft-total"><td>TOTAL PASSIVO + PL</td><td className="r">{fmtT(bp.total_passivo_pl)}</td><td className="pct">100,0%</td></tr>
+                <tr className="ft-group"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Passivo Circulante<InfoTooltip text={BP_TOOLTIP.passivo_circulante} /></span></td><td className="r">{fmtT(bp.passivo_circulante)}</td><td className="pct">{avPct(bp.passivo_circulante, totalAtivo)}</td></tr>
+                {(bp.total_passivo_nao_circulante ?? bp.passivo_nao_circulante ?? bp.passivo_exigivel_lp) != null && (() => { const pnc = bp.total_passivo_nao_circulante ?? bp.passivo_nao_circulante ?? bp.passivo_exigivel_lp; return <tr className="ft-group"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Passivo Não Circulante<InfoTooltip text={BP_TOOLTIP.passivo_nao_circulante} /></span></td><td className="r">{fmtT(pnc)}</td><td className="pct">{avPct(pnc, totalAtivo)}</td></tr>; })()}
+                <tr className="ft-group"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Patrimônio Líquido<InfoTooltip text={BP_TOOLTIP.patrimonio_liquido} /></span></td><td className="r">{fmtT(bp.patrimonio_liquido)}</td><td className="pct">{avPct(bp.patrimonio_liquido, totalAtivo)}</td></tr>
+                <tr className="ft-total"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>TOTAL PASSIVO + PL<InfoTooltip text={BP_TOOLTIP.total_passivo_pl} /></span></td><td className="r">{fmtT(bp.total_passivo_pl)}</td><td className="pct">100,0%</td></tr>
               </tbody>
             </table></div>
           </div>
@@ -678,14 +734,14 @@ export default function AnalysisView() {
           <div className="table-scroll"><table className="fin-table">
             <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
             <tbody>
-              <tr className="ft-group"><td>{dsp.ingressos != null ? 'Ingressos / Receita Bruta' : 'Receita Bruta'}</td><td className="r">{fmtT(dsp.ingressos ?? dsp.receita_bruta)}</td><td className="pct">{avPct(dsp.ingressos ?? dsp.receita_bruta, receitaRef)}</td></tr>
-              <tr className="ft-subtotal"><td>Receita Líquida</td><td className="r">{fmtT(dsp.receita_liquida)}</td><td className="pct">100,0%</td></tr>
-              {dsp.cmv != null && <tr className="ft-sub"><td>(-) CMV / CMO</td><td className="r">{fmtT(dsp.cmv)}</td><td className="pct">{avPct(dsp.cmv, receitaRef)}</td></tr>}
-              {dsp.lucro_bruto != null && <tr className="ft-subtotal"><td>Resultado Bruto</td><td className="r">{fmtT(dsp.lucro_bruto)}</td><td className="pct">{avPct(dsp.lucro_bruto, receitaRef)}</td></tr>}
-              {dsp.despesas_operacionais != null && <tr className="ft-sub"><td>(-) Despesas Operacionais</td><td className="r">{fmtT(dsp.despesas_operacionais)}</td><td className="pct">{avPct(dsp.despesas_operacionais, receitaRef)}</td></tr>}
-              <tr className="ft-ebitda"><td>EBITDA</td><td className="r">{fmtT(ebitda)}</td><td className="pct">{avPct(ebitda, receitaRef)}</td></tr>
-              {dsp.resultado_antes_ir != null && <tr className="ft-subtotal"><td>Resultado Antes do IR</td><td className="r">{fmtT(dsp.resultado_antes_ir)}</td><td className="pct">{avPct(dsp.resultado_antes_ir, receitaRef)}</td></tr>}
-              <tr className="ft-result"><td>SOBRAS / PERDAS</td><td className="r" style={(sobras ?? 0) < 0 ? { color: 'var(--red-t)' } : {}}>{fmtT(sobras)}</td><td className="pct">{avPct(sobras, receitaRef)}</td></tr>
+              <tr className="ft-group"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>{dsp.ingressos != null ? 'Ingressos / Receita Bruta' : 'Receita Bruta'}<InfoTooltip text={DSP_TOOLTIP.ingressos} /></span></td><td className="r">{fmtT(dsp.ingressos ?? dsp.receita_bruta)}</td><td className="pct">{avPct(dsp.ingressos ?? dsp.receita_bruta, receitaRef)}</td></tr>
+              <tr className="ft-subtotal"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Receita Líquida<InfoTooltip text={DSP_TOOLTIP.receita_liquida} /></span></td><td className="r">{fmtT(dsp.receita_liquida)}</td><td className="pct">100,0%</td></tr>
+              {dsp.cmv != null && <tr className="ft-sub"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>(-) CMV / CMO<InfoTooltip text={DSP_TOOLTIP.cmv} /></span></td><td className="r">{fmtT(dsp.cmv)}</td><td className="pct">{avPct(dsp.cmv, receitaRef)}</td></tr>}
+              {dsp.lucro_bruto != null && <tr className="ft-subtotal"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Resultado Bruto<InfoTooltip text={DSP_TOOLTIP.lucro_bruto} /></span></td><td className="r">{fmtT(dsp.lucro_bruto)}</td><td className="pct">{avPct(dsp.lucro_bruto, receitaRef)}</td></tr>}
+              {dsp.despesas_operacionais != null && <tr className="ft-sub"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>(-) Despesas Operacionais<InfoTooltip text={DSP_TOOLTIP.despesas_operacionais} /></span></td><td className="r">{fmtT(dsp.despesas_operacionais)}</td><td className="pct">{avPct(dsp.despesas_operacionais, receitaRef)}</td></tr>}
+              <tr className="ft-ebitda"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>EBITDA<InfoTooltip text={DSP_TOOLTIP.ebitda} /></span></td><td className="r">{fmtT(ebitda)}</td><td className="pct">{avPct(ebitda, receitaRef)}</td></tr>
+              {dsp.resultado_antes_ir != null && <tr className="ft-subtotal"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>Resultado Antes do IR<InfoTooltip text={DSP_TOOLTIP.resultado_antes_ir} /></span></td><td className="r">{fmtT(dsp.resultado_antes_ir)}</td><td className="pct">{avPct(dsp.resultado_antes_ir, receitaRef)}</td></tr>}
+              <tr className="ft-result"><td><span style={{ display: 'inline-flex', alignItems: 'center' }}>SOBRAS / PERDAS<InfoTooltip text={DSP_TOOLTIP.sobras} /></span></td><td className="r" style={(sobras ?? 0) < 0 ? { color: 'var(--red-t)' } : {}}>{fmtT(sobras)}</td><td className="pct">{avPct(sobras, receitaRef)}</td></tr>
             </tbody>
           </table></div>
         </div>

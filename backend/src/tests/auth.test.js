@@ -14,7 +14,7 @@ beforeAll(async () => {
 describe('POST /auth/register', () => {
   it('cria conta e retorna userId', async () => {
     const email = `reg_${Date.now()}@example.com`;
-    const res = await request(app).post('/auth/register').send({
+    const res = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Joao Silva', email, password: 'Senha123!', company: 'Escritório Teste', companyType: 'escritorio', sector: 'credito'
     });
     expect(res.status).toBe(200);
@@ -26,7 +26,7 @@ describe('POST /auth/register', () => {
 
   it('cria cliente-espelho e self_client_id quando companyType não é escritorio', async () => {
     const email = `reg_coop_${Date.now()}@example.com`;
-    const res = await request(app).post('/auth/register').send({
+    const res = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Ana Cooperada', email, password: 'Senha123!', company: 'Cooperativa Teste', companyType: 'cooperativa', sector: 'agropecuario'
     });
     expect(res.status).toBe(200);
@@ -47,7 +47,7 @@ describe('POST /auth/register', () => {
       VALUES (?, ?, 'Dupe User', 'dupe@example.com', ?, 'manager', 1)`)
       .run(nanoid(10), tid, await bcrypt.hash('x', 10));
 
-    const res = await request(app).post('/auth/register').send({
+    const res = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Dupe User', email: 'dupe@example.com', password: 'Senha123!', company: 'X'
     });
     expect(res.status).toBe(400);
@@ -55,12 +55,12 @@ describe('POST /auth/register', () => {
 
   it('permite recadastrar um e-mail cujo cadastro anterior nunca foi verificado', async () => {
     const email = `abandonado_${Date.now()}@example.com`;
-    const first = await request(app).post('/auth/register').send({
+    const first = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Primeira Tentativa', email, password: 'Senha123!', company: 'Empresa A', companyType: 'empresa', sector: 'outro'
     });
     expect(first.status).toBe(200);
 
-    const second = await request(app).post('/auth/register').send({
+    const second = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Segunda Tentativa', email, password: 'OutraSenha123!', company: 'Empresa B', companyType: 'cooperativa', sector: 'agropecuario'
     });
     expect(second.status).toBe(200);
@@ -73,14 +73,14 @@ describe('POST /auth/register', () => {
 
   it('permite recadastrar um e-mail verificado que nunca escolheu um plano', async () => {
     const email = `sem_plano_${Date.now()}@example.com`;
-    const first = await request(app).post('/auth/register').send({
+    const first = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Primeira Tentativa', email, password: 'Senha123!', company: 'Empresa A', companyType: 'empresa', sector: 'outro'
     });
     expect(first.status).toBe(200);
     const verify = await request(app).post('/auth/verify-email').send({ userId: first.body.userId, code: first.body.devCode });
     expect(verify.status).toBe(200);
 
-    const second = await request(app).post('/auth/register').send({
+    const second = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Segunda Tentativa', email, password: 'OutraSenha123!', company: 'Empresa B', companyType: 'cooperativa', sector: 'agropecuario'
     });
     expect(second.status).toBe(200);
@@ -93,14 +93,14 @@ describe('POST /auth/register', () => {
 
   it('rejeita recadastro de e-mail verificado que já escolheu um plano', async () => {
     const email = `com_plano_${Date.now()}@example.com`;
-    const first = await request(app).post('/auth/register').send({
+    const first = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Pessoa Plano', email, password: 'Senha123!', company: 'Empresa Plano', companyType: 'empresa', sector: 'outro'
     });
     const verify = await request(app).post('/auth/verify-email').send({ userId: first.body.userId, code: first.body.devCode });
     await request(app).post('/account/select-plan')
       .set('Authorization', `Bearer ${verify.body.token}`).send({ plan: 'trial' });
 
-    const second = await request(app).post('/auth/register').send({
+    const second = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Outra Pessoa', email, password: 'OutraSenha123!', company: 'Empresa X', companyType: 'empresa', sector: 'outro'
     });
     expect(second.status).toBe(400);
@@ -108,7 +108,7 @@ describe('POST /auth/register', () => {
   });
 
   it('nunca apaga uma conta sem tenant (ex.: administrador) ao tentar recadastrar o e-mail', async () => {
-    const res = await request(app).post('/auth/register').send({
+    const res = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Impostor Falso', email: 'admin@demo.com', password: 'Senha123!',
       company: 'Empresa Falsa', companyType: 'empresa', sector: 'outro',
     });
@@ -121,7 +121,7 @@ describe('POST /auth/register', () => {
 
   it('não apaga um tenant que já foi onboarded mesmo que o plano tenha sido cancelado depois', async () => {
     const email = `cancelado_${Date.now()}@example.com`;
-    const first = await request(app).post('/auth/register').send({
+    const first = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Cliente Real', email, password: 'Senha123!', company: 'Empresa Real', companyType: 'empresa', sector: 'outro'
     });
     const verify = await request(app).post('/auth/verify-email').send({ userId: first.body.userId, code: first.body.devCode });
@@ -132,7 +132,7 @@ describe('POST /auth/register', () => {
     // onboarded_at permanece, então a conta continua contando como real.
     await db.prepare('UPDATE tenants SET plan = NULL WHERE id = (SELECT tenant_id FROM users WHERE email = ?)').run(email);
 
-    const second = await request(app).post('/auth/register').send({
+    const second = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Golpista Falso', email, password: 'OutraSenha123!', company: 'Empresa Falsa', companyType: 'empresa', sector: 'outro'
     });
     expect(second.status).toBe(400);
@@ -143,7 +143,7 @@ describe('POST /auth/register', () => {
   });
 
   it('rejeita senha fraca', async () => {
-    const res = await request(app).post('/auth/register').send({
+    const res = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Maria Fraca', email: 'fraca_unique@example.com', password: '123', company: 'X'
     });
     expect(res.status).toBe(400);
@@ -221,7 +221,7 @@ describe('POST /auth/facebook/complete', () => {
 describe('Fluxo de plano após verificação de e-mail', () => {
   async function registerAndVerify(overrides = {}) {
     const email = `plano_${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`;
-    const reg = await request(app).post('/auth/register').send({
+    const reg = await request(app).post('/auth/register').send({ terms_accepted: true,
       name: 'Pessoa Plano', email, password: 'Senha123!',
       company: 'Escritório Plano', companyType: 'escritorio', sector: 'credito',
       ...overrides,

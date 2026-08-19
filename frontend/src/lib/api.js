@@ -121,7 +121,10 @@ export async function apiCall(method, path, body, { onRetry, _retry } = {}) {
     res = await fetchWithRetry(`${BASE}${path}`, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined
+      body: body ? JSON.stringify(body) : undefined,
+      // Evita cache HTTP e sinaliza ao browser para não usar BFCache
+      // (back-forward cache) nesta página — garante dados frescos ao navegar.
+      cache: 'no-store',
     }, onRetry);
   } catch (e) {
     throw new ApiError(0, 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.', null, e);

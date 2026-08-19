@@ -79,8 +79,12 @@ describe('parseJsonFromLLM', () => {
     expect(parseJsonFromLLM('{"a": 1, "b": [1, 2,], }')).toEqual({ a: 1, b: [1, 2] });
   });
 
-  it('substitui o literal NaN por 0', () => {
-    expect(parseJsonFromLLM('{"a": NaN}')).toEqual({ a: 0 });
+  // NaN significa "a IA não conseguiu apurar este campo" — vira null (dado
+  // ausente), nunca 0. Zerar produziria um indicador falso com cara de fato
+  // real (ver a doc de `out()` em calculator.js); o `?? 0` do cálculo já
+  // trata o null sem quebrar as contas.
+  it('substitui o literal NaN por null (dado ausente, não zero)', () => {
+    expect(parseJsonFromLLM('{"a": NaN}')).toEqual({ a: null });
   });
 
   it('lança erro em JSON genuinamente inválido', () => {

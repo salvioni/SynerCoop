@@ -1,7 +1,20 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 
-const KEY = 'synercoop-theme';
+const GLOBAL_KEY = 'synercoop-theme';
 const ThemeCtx = createContext({ theme: 'light', setTheme: () => {} });
+
+function userKey(userId) {
+  return userId ? `synercoop-theme-u${userId}` : GLOBAL_KEY;
+}
+
+function getStoredTheme(userId) {
+  // Prefere a preferência específica do usuário; cai na global como fallback
+  return (
+    (userId && localStorage.getItem(userKey(userId))) ||
+    localStorage.getItem(GLOBAL_KEY) ||
+    'light'
+  );
+}
 
 function applyTheme(theme) {
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -11,20 +24,38 @@ function applyTheme(theme) {
 
 // Chamado antes do React montar para evitar flash de tema errado
 export function initTheme() {
-  const theme = localStorage.getItem(KEY) || 'light';
-  applyTheme(theme);
+  applyTheme(localStorage.getItem(GLOBAL_KEY) || 'light');
 }
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState(() => {
+  const [userId, setUserId] = useState(null);
+  const [theme, setThemeState] = useState(() => {
     // Migrar chaves antigas
     const old = localStorage.getItem('fa_theme') || localStorage.getItem('finanalyze-theme');
     if (old) { localStorage.removeItem('fa_theme'); localStorage.removeItem('finanalyze-theme'); }
-    return localStorage.getItem(KEY) || old || 'light';
+    return localStorage.getItem(GLOBAL_KEY) || old || 'light';
   });
 
+  // Ouve login/logout vindos de auth.jsx e aplica a preferência de tema
+  // específica da conta, isolando a escolha de cada usuário no dispositivo.
   useEffect(() => {
-    localStorage.setItem(KEY, theme);
+    function onUserChanged(e) {
+      const uid = e.detail?.userId ?? null;
+      setUserId(uid);
+      setThemeState(getStoredTheme(uid));
+    }
+    window.addEventListener('auth:user-changed', onUserChanged);
+    return () => window.removeEventListener('auth:user-changed', onUserChanged);
+  }, []);
+
+  function setTheme(t) {
+    // Salva na chave do usuário e também na global (fallback pré-login)
+    if (userId) localStorage.setItem(userKey(userId), t);
+    localStorage.setItem(GLOBAL_KEY, t);
+    setThemeState(t);
+  }
+
+  useEffect(() => {
     applyTheme(theme);
 
     if (theme === 'system') {

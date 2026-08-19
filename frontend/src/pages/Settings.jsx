@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
+import { useAccountInfo } from '../lib/accountInfo.jsx';
 import { api, uploadFile, ApiError, downloadFile } from '../lib/api.js';
 import { getPlan } from '../lib/plans.js';
 import { TENANT_TYPES } from '../lib/constants.js';
@@ -10,6 +11,7 @@ import ConfirmModal from '../components/ConfirmModal.jsx';
 
 export default function Settings() {
   const { user, refresh } = useAuth();
+  const { refetch: refetchAccountInfo } = useAccountInfo();
   const tenantType = TENANT_TYPES.find(t => t.value === user?.tenant_type) || TENANT_TYPES.find(t => t.value === 'escritorio');
   const { theme, setTheme } = useTheme();
   const location = useLocation();
@@ -197,7 +199,7 @@ export default function Settings() {
       await api.patch('/account', { name: draft, cnpj: draftCnpj, phone: draftPhone, billingEmail: draftBillingEmail });
       if (pendingLogoFile) await uploadFile('/account/logo', pendingLogoFile);
       else if (logoRemoved) await api.del('/account/logo');
-      await refresh();
+      await Promise.all([refresh(), refetchAccountInfo()]);
       const d = await api.get('/account');
       setInfo(d);
       setCompanyName(d.companyName || '');
@@ -308,7 +310,7 @@ export default function Settings() {
       <form onSubmit={saveProfile}>
       <section style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 32 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', margin: 0 }}>Meu perfil</h2>
+          <h2 className="settings-h2">Meu perfil</h2>
           {!editProfile
             ? <button type="button" className="btn" onClick={() => { setSaveProfileErr(''); startEditProfile(); }}><i className="ti ti-edit"></i> Editar</button>
             : <div style={{ display: 'flex', gap: 8 }}>
@@ -384,7 +386,7 @@ export default function Settings() {
       <form onSubmit={saveOffice}>
       <section id="escritorio" style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', margin: 0 }}>{tenantType.label}</h2>
+          <h2 className="settings-h2">{tenantType.label}</h2>
           {!editOffice
             ? <button type="button" className="btn" onClick={() => { setSaveOfficeErr(''); startEdit(); }}><i className="ti ti-edit"></i> Editar</button>
             : <div style={{ display: 'flex', gap: 8 }}>
@@ -475,7 +477,7 @@ export default function Settings() {
       {/* ── Membros ── */}
       <section style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: removeMemberErr ? 12 : 20 }}>
-          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', margin: 0 }}>Membros</h2>
+          <h2 className="settings-h2">Membros</h2>
           <button className="btn btn-p" onClick={openInvite}><i className="ti ti-user-plus"></i> Convidar</button>
         </div>
         {removeMemberErr && (
@@ -549,7 +551,7 @@ export default function Settings() {
       </section>
 
       <section style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
-        <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', marginBottom: 16 }}>Plano e cobrança</h2>
+        <h2 className="settings-h2" style={{ marginBottom: 16 }}>Plano e cobrança</h2>
         {(() => {
           const plan = getPlan(info?.plan);
           const used = info?.monthlyAnalyses ?? 0;
@@ -585,7 +587,7 @@ export default function Settings() {
       </section>
 
       <section style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
-        <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', marginBottom: 16 }}>Aparência</h2>
+        <h2 className="settings-h2" style={{ marginBottom: 16 }}>Aparência</h2>
         <div style={{ display: 'flex', gap: 10 }}>
           {[
             { k: 'light', label: 'Claro', icon: 'ti-sun' },
@@ -610,7 +612,7 @@ export default function Settings() {
 
       {/* ── Privacidade (LGPD) ── */}
       <section style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
-        <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: 'var(--t0)', marginBottom: 8 }}>Privacidade e dados</h2>
+        <h2 className="settings-h2" style={{ marginBottom: 8 }}>Privacidade e dados</h2>
         <p style={{ fontSize: 13, color: 'var(--t2)', marginBottom: 16 }}>
           Pela LGPD (Art. 18), você tem direito de acessar e exportar todos os seus dados pessoais armazenados pelo SynerCoop.
         </p>

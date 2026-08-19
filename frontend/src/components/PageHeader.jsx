@@ -3,7 +3,7 @@ export default function PageHeader({ subtitle, title, action }) {
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
       <div>
         <div style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 2 }}>{subtitle}</div>
-        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginTop: 0, color: 'var(--t0)' }}>{title}</h1>
+        <h1 className="page-h1">{title}</h1>
       </div>
       {action}
     </div>

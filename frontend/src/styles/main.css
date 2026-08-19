@@ -135,6 +135,13 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .page-head-l p { font-size: 14px; color: var(--t2); margin-bottom: 2px }
 .page-head-l h1 { font-family: var(--font-serif); font-size: 36px; font-weight: 400; color: var(--t0); letter-spacing: -0.01em; line-height: 1.15 }
 .page-h1 { font-family: var(--font-serif); font-size: 36px; font-weight: 400; color: var(--t0); letter-spacing: -0.01em; line-height: 1.15; margin-top: 0 }
+.display-val-lg { font-family: var(--font-serif); font-size: 28px; font-weight: 500 }
+.display-val-md { font-family: var(--font-serif); font-size: 22px; font-weight: 600 }
+.display-num { font-family: var(--font-serif); font-size: 32px; line-height: 1; flex-shrink: 0; width: 40px; text-align: right }
+.client-view-name { font-size: 30px; line-height: 1; font-weight: 500 }
+.settings-h2 { font-family: var(--font-serif); font-size: 24px; font-weight: 500; color: var(--t0); margin: 0 }
+/* client header — flex row que pode quebrar em telas pequenas */
+.client-hd { flex-wrap: wrap; row-gap: 8px }
 .page-body { flex: 1; overflow-y: auto; padding: 52px 32px 40px }
 
 /* ── Nav Tabs (inside page) ── */
@@ -491,6 +498,36 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .dash-analysis-name { font-size: 14px; font-weight: 500; color: var(--t0) }
 .dash-analysis-meta { font-size: 12px; color: var(--t2); margin-top: 4px }
 
+/* ── AnalysisRow — componente compartilhado de linha de análise ── */
+.an-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--bd); cursor: pointer; transition: background .12s }
+.an-row:last-child { border-bottom: none }
+.an-row:hover { background: var(--bg2); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 8px }
+.an-row-compact { padding: 10px 0 }
+.an-row-badge { width: 38px; height: 38px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--bd); display: flex; align-items: center; justify-content: center; font-family: var(--font-serif); font-size: 14px; color: var(--blue-text); flex-shrink: 0 }
+.an-row-body { flex: 1; min-width: 0 }
+.an-row-client { font-size: 14px; font-weight: 600; color: var(--t0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px }
+.an-row-period { font-size: 13px; font-weight: 500; color: var(--t0) }
+.an-row-meta { font-size: 12px; color: var(--t2); margin-top: 2px; display: flex; align-items: center; gap: 4px }
+.an-row-tail { display: flex; align-items: center; gap: 8px; flex-shrink: 0 }
+
+/* ── Typography system ──────────────────────────────────────────────────────
+   Escala consistente para usar em toda a aplicação:
+   page-h1  (36px serif)  →  título de página
+   h2       (20px serif)  →  título de seção dentro de página
+   h3       (18px serif)  →  título de painel / card
+   card-title (15px 600)  →  cabeçalho de card sans-serif
+   ty-label (11px upper)  →  label de campo / categoria
+   ty-meta  (12px t2)     →  metadado secundário
+   ty-caption (12px t3)   →  legenda / nota terciária
+   ─────────────────────────────────────────────────────────────────────── */
+.page-body h2 { font-family: var(--font-serif); font-size: 20px; font-weight: 400; color: var(--t0); letter-spacing: -0.01em; line-height: 1.3; margin: 0 }
+.page-body h3 { font-family: var(--font-serif); font-size: 18px; font-weight: 400; color: var(--t0); letter-spacing: -0.01em; line-height: 1.3; margin: 0 }
+.panel-title { font-family: var(--font-serif); font-size: 18px; font-weight: 400; color: var(--t0); letter-spacing: -0.01em; line-height: 1.3 }
+.card-title  { font-family: var(--font-sans);  font-size: 15px; font-weight: 600; color: var(--t0); line-height: 1.3 }
+.ty-label    { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .07em; color: var(--t2) }
+.ty-meta     { font-size: 12px; color: var(--t2); line-height: 1.5 }
+.ty-caption  { font-size: 12px; color: var(--t3); line-height: 1.5 }
+
 /* ── Landing page ── */
 .landing { min-height: 100vh; background: var(--bg0); color: var(--t0) }
 .ld-container { width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 24px }
@@ -593,10 +630,23 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
   .page-body { padding: 20px 16px 80px !important }
   .page-head-l h1 { font-size: 28px }
   .page-h1 { font-size: 28px }
+  .display-val-lg { font-size: 22px }
+  .display-val-md { font-size: 18px }
+  .display-num { font-size: 24px }
+  .client-view-name { font-size: 22px }
+  .settings-h2 { font-size: 20px }
+  .client-hd { margin-bottom: 20px !important }
   .dash-grid { grid-template-columns: repeat(2, 1fr) }
+  .dash-card { padding: 14px 16px }
+  .dash-card-val { font-size: 24px }
+  .dash-section { padding: 16px }
+  .dash-section-title { font-size: 17px }
+  .dash-analysis-row { padding: 10px 0 }
   .dash-cols { grid-template-columns: 1fr }
   .cl-grid { grid-template-columns: 1fr }
   .cl-card { padding: 16px }
+  .cl-card-name { font-size: 18px; margin-bottom: 6px }
+  .cl-card-av { width: 40px; height: 40px; font-size: 14px }
   .rv-grid { grid-template-columns: repeat(2, 1fr) }
   .sum-row { grid-template-columns: repeat(2, 1fr) }
   .bp-wrap { grid-template-columns: 1fr }
@@ -628,8 +678,19 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
   .page-head { flex-direction: column; align-items: flex-start; gap: 12px }
   .page-head-l h1 { font-size: 24px }
   .page-h1 { font-size: 24px }
+  .display-val-lg { font-size: 18px }
+  .display-val-md { font-size: 16px }
+  .display-num { font-size: 20px }
+  .client-view-name { font-size: 20px }
+  .settings-h2 { font-size: 18px }
+  .client-hd { margin-bottom: 16px !important }
   .dash-grid { grid-template-columns: 1fr }
-  .dash-card-val { font-size: 28px }
+  .dash-card { padding: 12px 14px }
+  .dash-card-val { font-size: 20px }
+  .dash-section { padding: 12px }
+  .cl-card { padding: 12px }
+  .cl-card-name { font-size: 16px; margin-bottom: 4px }
+  .cl-card-av { width: 34px; height: 34px; font-size: 13px; border-radius: 8px }
   .rv-grid { grid-template-columns: 1fr }
   .sum-row { grid-template-columns: 1fr }
   .grid-5 { grid-template-columns: 1fr }

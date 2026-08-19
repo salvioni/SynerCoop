@@ -5,6 +5,8 @@ import { useBackNavigate } from '../lib/useBackNavigate.js';
 import ConfirmModal from './ConfirmModal.jsx';
 import ClientFormModal from './ClientFormModal.jsx';
 import { initials } from './UserAvatar.jsx';
+import InfoTooltip from './InfoTooltip.jsx';
+import AnalysisRow from './AnalysisRow.jsx';
 import { periodLabel, periodShort } from '../lib/period.js';
 import { SIGNING_ENABLED } from '../lib/constants.js';
 import {
@@ -97,36 +99,6 @@ const YAXDIAS = <YAxis tick={{ fontSize: 11, fill: 'var(--t2)' }} axisLine={fals
 const YAXNUM  = <YAxis tick={{ fontSize: 11, fill: 'var(--t2)' }} axisLine={false} tickLine={false} tickFormatter={v => Number(v).toFixed(1)} width={44} />;
 const LEG     = <Legend wrapperStyle={{ fontSize: 12 }} />;
 
-// ── InfoTooltip ───────────────────────────────────────────────────────
-// Ícone ⓘ com popup de explicação em linguagem simples — acessível para
-// quem não tem formação financeira. Basta passar a prop `text`.
-function InfoTooltip({ text }) {
-  const [show, setShow] = useState(false);
-  return (
-    <span
-      style={{ position: 'relative', display: 'inline-flex', marginLeft: 5, verticalAlign: 'middle' }}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-    >
-      <i className="ti ti-info-circle" style={{ fontSize: 13, color: 'var(--t3)', cursor: 'help', lineHeight: 1 }} />
-      {show && (
-        <div style={{
-          position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
-          width: 240, background: '#1a2a4a', color: '#dde4ef', fontSize: 12, lineHeight: 1.6,
-          padding: '10px 14px', borderRadius: 8, zIndex: 300,
-          boxShadow: '0 4px 20px rgba(0,0,0,.35)', whiteSpace: 'normal', pointerEvents: 'none',
-          textTransform: 'none', letterSpacing: 'normal', fontWeight: 400,
-          fontFamily: 'var(--font-sans)', fontSize: 12,
-        }}>
-          {text}
-          {/* seta */}
-          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '6px solid #1a2a4a' }} />
-        </div>
-      )}
-    </span>
-  );
-}
-
 // ── Semáforo financeiro para cooperativas ────────────────────────────
 // Retorna 'good' | 'warn' | 'bad' | null com base em benchmarks setoriais.
 function health(key, value) {
@@ -186,7 +158,7 @@ function PieLegend({ data, colors }) {
 
 // Painel de análises de um único cliente — usado em ClientView.jsx
 // e em Dashboard.jsx para contas de entidade única (cooperativa/empresa/etc).
-export default function ClientDashboard({ clientId, backHref, allowDelete = true }) {
+export default function ClientDashboard({ clientId, backHref, allowDelete = true, hideHeader = false }) {
   const navigate = useNavigate();
   const [client, setClient]       = useState(null);
   const [analyses, setAnalyses]   = useState([]);
@@ -551,46 +523,48 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
       )}
 
       {/* ── Cabeçalho do cliente ──────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 32 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-          <div className="cl-card-av" style={{
-            width: 56, height: 56, borderRadius: 12, fontSize: 18, flexShrink: 0,
-            ...(client.logo ? { backgroundImage: `url(${client.logo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : client.logo_color ? { background: client.logo_color } : {}),
-          }}>
-            {!client.logo && initials(client.name)}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: 56 }}>
-            <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 10, color: client.active ? 'var(--t0)' : 'var(--t3)' }}>
-              {client.name}
-              {!client.active && <span className="pill pill-y">Arquivado</span>}
-            </h1>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 14, color: 'var(--t2)' }}>
-              <span style={{ textTransform: 'capitalize' }}>{client.type || 'empresa'}</span>
-              {client.cnpj && <span style={{ fontFamily: 'ui-monospace, monospace' }}>{client.cnpj}</span>}
-              {client.contact_email && <span><i className="ti ti-mail" style={{ fontSize: 14, marginRight: 4 }} />{client.contact_email}</span>}
+      {!hideHeader && (
+        <div className="client-hd" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 32 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+            <div className="cl-card-av" style={{
+              width: 56, height: 56, borderRadius: 12, fontSize: 18, flexShrink: 0,
+              ...(client.logo ? { backgroundImage: `url(${client.logo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : client.logo_color ? { background: client.logo_color } : {}),
+            }}>
+              {!client.logo && initials(client.name)}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: 56 }}>
+              <h1 className="client-view-name" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, color: client.active ? 'var(--t0)' : 'var(--t3)' }}>
+                {client.name}
+                {!client.active && <span className="pill pill-y">Arquivado</span>}
+              </h1>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 14, color: 'var(--t2)' }}>
+                <span style={{ textTransform: 'capitalize' }}>{client.type || 'empresa'}</span>
+                {client.cnpj && <span style={{ fontFamily: 'ui-monospace, monospace' }}>{client.cnpj}</span>}
+                {client.contact_email && <span><i className="ti ti-mail" style={{ fontSize: 14, marginRight: 4 }} />{client.contact_email}</span>}
+              </div>
             </div>
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button className="ib" title="Editar cliente" onClick={() => setEditModal(true)} style={{ color: 'var(--t2)', padding: 8 }}>
-            <i className="ti ti-edit" style={{ fontSize: 22 }} />
-          </button>
-          {allowDelete && (client.active ? (
-            <button className="ib" title="Arquivar cliente" style={{ color: 'var(--t2)', padding: 8 }} onClick={() => setConfirm({
-              title: 'Arquivar cliente',
-              message: `"${client.name}" será movido para arquivados. O histórico de análises é mantido e você pode reativá-lo quando quiser.`,
-              confirmLabel: 'Arquivar', danger: true,
-              onConfirm: archiveClient,
-            })}>
-              <i className="ti ti-archive" style={{ fontSize: 22 }} />
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button className="ib" title="Editar cliente" onClick={() => setEditModal(true)} style={{ color: 'var(--t2)', padding: 8 }}>
+              <i className="ti ti-edit" style={{ fontSize: 22 }} />
             </button>
-          ) : (
-            <button className="ib" title="Reativar cliente" onClick={reactivate} style={{ color: 'var(--t2)', padding: 8 }}>
-              <i className="ti ti-archive-off" style={{ fontSize: 22 }} />
-            </button>
-          ))}
+            {allowDelete && (client.active ? (
+              <button className="ib" title="Arquivar cliente" style={{ color: 'var(--t2)', padding: 8 }} onClick={() => setConfirm({
+                title: 'Arquivar cliente',
+                message: `"${client.name}" será movido para arquivados. O histórico de análises é mantido e você pode reativá-lo quando quiser.`,
+                confirmLabel: 'Arquivar', danger: true,
+                onConfirm: archiveClient,
+              })}>
+                <i className="ti ti-archive" style={{ fontSize: 22 }} />
+              </button>
+            ) : (
+              <button className="ib" title="Reativar cliente" onClick={reactivate} style={{ color: 'var(--t2)', padding: 8 }}>
+                <i className="ti ti-archive-off" style={{ fontSize: 22 }} />
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── Cards de resumo ───────────────────────────────────────────── */}
       <div className="dash-grid" style={{ marginBottom: 24 }}>
@@ -932,36 +906,13 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
             Nenhuma análise realizada.
           </div>
         ) : (
-          [...analyses].sort((a, b) => b.year - a.year || new Date(b.created_at) - new Date(a.created_at)).map((a, i) => (
-            <div key={a.id}
-              onClick={() => navigate(`/app/analyses/${a.id}`)}
-              style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderTop: i > 0 ? '1px solid var(--bd)' : 'none', cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <div style={{ width: 40, height: 40, borderRadius: 8, background: 'var(--bg2)', border: '1px solid var(--bd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--blue-text)', flexShrink: 0 }}>
-                {a.year}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t0)' }}>{periodLabel(a)}</div>
-                <div style={{ fontSize: 12, color: 'var(--t2)', marginTop: 2 }}>{new Date(a.created_at).toLocaleDateString('pt-BR')}</div>
-              </div>
-              {SIGNING_ENABLED && (
-                <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{a.status === 'signed' ? 'Assinada' : 'Editável'}</span>
-              )}
-              <div onClick={e => e.stopPropagation()}>
-                <button className="ib ib-d" title="Excluir" onClick={() => setConfirm({
-                  title: `Excluir análise de ${periodShort(a)}?`,
-                  message: 'Esta ação é irreversível.',
-                  danger: true, confirmLabel: 'Excluir',
-                  onConfirm: () => deleteAnalysis(a),
-                })}>
-                  <i className="ti ti-trash" />
-                </button>
-              </div>
-              <i className="ti ti-chevron-right" style={{ color: 'var(--t3)', flexShrink: 0 }} />
-            </div>
-          ))
+          <div style={{ padding: '0 8px' }}>
+            {[...analyses]
+              .sort((a, b) => b.year - a.year || new Date(b.created_at) - new Date(a.created_at))
+              .map(a => (
+                <AnalysisRow key={a.id} analysis={a} hideClient onDelete={deleteAnalysis} />
+              ))}
+          </div>
         )}
       </div>
 

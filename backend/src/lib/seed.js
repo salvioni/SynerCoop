@@ -93,18 +93,41 @@ export async function seedDb() {
   const indicators2024 = calculateIndicators({ bp: bp2024, dsp: dsp2024 });
   const indicators2023 = calculateIndicators({ bp: bp2023, dsp: dsp2023 });
 
-  const insAnalysis = db.prepare(`INSERT INTO analyses (id, client_id, year, bp, dsp, indicators, status, confidence, notes)
-                                   VALUES (?, ?, ?, ?, ?, ?, 'done', 1.0, ?)`);
-  await insAnalysis.run(
-    'an-' + nanoid(8), client1Id, 2024,
+  const insAnalysis = db.prepare(`INSERT INTO analyses (id, client_id, year, period_label, bp, dsp, indicators, status, confidence, notes)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, 'done', 1.0, ?)
+                                   ON CONFLICT (id) DO NOTHING`);
+
+  // Cooperativa Citrus — anuais
+  insAnalysis.run(
+    'an-demo-citrus-2024', client1Id, 2024, null,
     JSON.stringify(bp2024), JSON.stringify(dsp2024), JSON.stringify(indicators2024),
     'Extraído do formato padrão Balanço Perguntado'
   );
-  await insAnalysis.run(
-    'an-' + nanoid(8), client1Id, 2023,
+  insAnalysis.run(
+    'an-demo-citrus-2023', client1Id, 2023, null,
     JSON.stringify(bp2023), JSON.stringify(dsp2023), JSON.stringify(indicators2023),
     'Extraído do formato padrão Balanço Perguntado'
   );
+
+  // Cooperativa Citrus — 2025, múltiplos períodos (demonstra filtro de período)
+  const periodsCitrus = [
+    { id: 'an-demo-jan25',    periodLabel: 'Janeiro de 2025',      bp: { ativo_circulante: 1050000, caixa: 345000, contas_receber_cp: 215000, adiantamentos: 52000, estoques: 435000, ativo_nao_circulante: 780000, ativo_permanente: 780000, total_ativo: 1830000, passivo_circulante: 700000, emprestimos_cp: 98000, passivo_nao_circulante: 430000, emprestimos_lp: 42000, patrimonio_liquido: 700000, capital_social: 500000, capital_integralizar: 0 }, dsp: { receita_bruta: 18000, impostos_venda: -500, receita_liquida: 17500, custos_vendas: 0, despesas_operacionais: 0, ebitda: 17500, sobras_perdas: 17500 } },
+    { id: 'an-demo-bim125',   periodLabel: '1º Bimestre de 2025',  bp: { ativo_circulante: 1060000, caixa: 350000, contas_receber_cp: 218000, adiantamentos: 53000, estoques: 436000, ativo_nao_circulante: 782000, ativo_permanente: 782000, total_ativo: 1842000, passivo_circulante: 705000, emprestimos_cp: 98000, passivo_nao_circulante: 432000, emprestimos_lp: 42000, patrimonio_liquido: 705000, capital_social: 500000, capital_integralizar: 0 }, dsp: { receita_bruta: 35000, impostos_venda: -900, receita_liquida: 34100, custos_vendas: 0, despesas_operacionais: 0, ebitda: 34100, sobras_perdas: 34000 } },
+    { id: 'an-demo-tri125',   periodLabel: '1º Trimestre de 2025', bp: { ativo_circulante: 1075000, caixa: 358000, contas_receber_cp: 222000, adiantamentos: 54000, estoques: 438000, ativo_nao_circulante: 785000, ativo_permanente: 785000, total_ativo: 1860000, passivo_circulante: 710000, emprestimos_cp: 96000, passivo_nao_circulante: 435000, emprestimos_lp: 41000, patrimonio_liquido: 715000, capital_social: 500000, capital_integralizar: 0 }, dsp: { receita_bruta: 54000, impostos_venda: -1400, receita_liquida: 52600, custos_vendas: 0, despesas_operacionais: 0, ebitda: 52600, sobras_perdas: 52000 } },
+    { id: 'an-demo-sem125',   periodLabel: '1º Semestre de 2025',  bp: { ativo_circulante: 1095000, caixa: 370000, contas_receber_cp: 228000, adiantamentos: 55000, estoques: 439000, ativo_nao_circulante: 790000, ativo_permanente: 790000, total_ativo: 1885000, passivo_circulante: 718000, emprestimos_cp: 95000, passivo_nao_circulante: 438000, emprestimos_lp: 41000, patrimonio_liquido: 729000, capital_social: 500000, capital_integralizar: 0 }, dsp: { receita_bruta: 108000, impostos_venda: -2800, receita_liquida: 105200, custos_vendas: 0, despesas_operacionais: 0, ebitda: 105200, sobras_perdas: 105000 } },
+  ];
+  for (const p of periodsCitrus) {
+    const ind = calculateIndicators({ bp: p.bp, dsp: p.dsp });
+    insAnalysis.run(p.id, client1Id, 2025, p.periodLabel, JSON.stringify(p.bp), JSON.stringify(p.dsp), JSON.stringify(ind), `Dado demo — ${p.periodLabel}`);
+  }
+
+  // Empresa Exemplo — anual 2024 e trimestral 2025
+  const bp_emp24 = { ativo_circulante: 580000, caixa: 180000, contas_receber_cp: 230000, adiantamentos: 20000, estoques: 145000, ativo_nao_circulante: 420000, ativo_permanente: 420000, total_ativo: 1000000, passivo_circulante: 320000, emprestimos_cp: 65000, passivo_nao_circulante: 180000, emprestimos_lp: 35000, patrimonio_liquido: 500000, capital_social: 400000, capital_integralizar: 0 };
+  const dsp_emp24 = { receita_bruta: 920000, devolucoes: -18000, impostos_venda: -82000, receita_liquida: 820000, custos_vendas: -480000, resultado_bruto: 340000, despesas_operacionais: -242000, ebitda: 98000, depreciacao: -22000, sobras_perdas: 60000 };
+  const bp_emp_tri25 = { ativo_circulante: 605000, caixa: 195000, contas_receber_cp: 240000, adiantamentos: 22000, estoques: 143000, ativo_nao_circulante: 415000, ativo_permanente: 415000, total_ativo: 1020000, passivo_circulante: 325000, emprestimos_cp: 63000, passivo_nao_circulante: 178000, emprestimos_lp: 35000, patrimonio_liquido: 517000, capital_social: 400000, capital_integralizar: 0 };
+  const dsp_emp_tri25 = { receita_bruta: 232000, devolucoes: -4500, impostos_venda: -21000, receita_liquida: 206500, custos_vendas: -121000, resultado_bruto: 85500, despesas_operacionais: -61000, ebitda: 24500, depreciacao: -5500, sobras_perdas: 16000 };
+  insAnalysis.run('an-demo-emp24', client2Id, 2024, null, JSON.stringify(bp_emp24), JSON.stringify(dsp_emp24), JSON.stringify(calculateIndicators({ bp: bp_emp24, dsp: dsp_emp24 })), 'Dado demo — exercício anual');
+  insAnalysis.run('an-demo-emp-tri125', client2Id, 2025, '1º Trimestre de 2025', JSON.stringify(bp_emp_tri25), JSON.stringify(dsp_emp_tri25), JSON.stringify(calculateIndicators({ bp: bp_emp_tri25, dsp: dsp_emp_tri25 })), 'Dado demo — 1º Trimestre de 2025');
 
   // Conta admin de demonstração — fixa, independente de ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD,
   // pra sempre existir em dev sem exigir configuração de env (usada pelos botões de demo).

@@ -64,49 +64,42 @@ export async function countMonthlyAnalyses(tenantId) {
   return row?.cnt || 0;
 }
 
-const ANON_LABEL = '[anonimizado]';
+const ANON_LABEL = '[registro anonimizado]';
 const ANON_ID    = '[anon]';
 
 /**
  * Aplica a política de retenção LGPD (24 meses).
  *
  * Campos apagados após o prazo:
- *   - actor_name   → '[anonimizado]'
+ *   - actor_name   → ANON_LABEL
  *   - target_label → NULL
  *   - meta         → NULL
- *   - actor_id     → '[anon]' (apenas em Postgres, onde a coluna pode ser nullable;
- *                    no SQLite a migração que torna a coluna nullable pode não ter
- *                    sido aplicada, mas a tentativa é feita de qualquer forma)
+ *   - actor_id     → ANON_ID (apenas onde a coluna aceita a escrita; em schemas
+ *                    que rejeitam, o fallback abaixo preserva o resto)
  *
- * Idempotente: a condição `actor_name != ANON_LABEL` garante que linhas
- * já anonimizadas não são reprocessadas.
+ * Idempotente: a condição `actor_name != ANON_LABEL` garante que linhas já
+ * anonimizadas não são reprocessadas.
+ *
+ * @returns {Promise<number>} linhas anonimizadas NESTA execução (0 quando não
+ *   havia nada novo) — é o que o agendador em server.js usa para decidir se
+ *   vale logar. Nunca o total acumulado.
  */
 export async function anonymizeOldAuditLogs() {
   const cutoff = monthsAgoISO(AUDIT_RETENTION_MONTHS);
+  const WHERE  = 'WHERE created_at < ? AND actor_name != ?';
 
   // Tenta apagar actor_id também (requer a coluna nullable — ver migração em db.js).
   // Falha silenciosamente em drivers/schemas que não suportam.
   try {
-    await db.exec(`
-      UPDATE audit_logs
-      SET actor_name = '${ANON_LABEL}', actor_id = '${ANON_ID}', target_label = NULL, meta = NULL
-      WHERE created_at < '${cutoff}' AND actor_name != '${ANON_LABEL}'
-    `);
-    // Conta linhas afetadas via query separada (compatível com ambos os drivers)
-    const row = await db.prepare(
-      `SELECT COUNT(*) AS cnt FROM audit_logs WHERE created_at < ? AND actor_name = ?`
-    ).get(cutoff, ANON_LABEL);
-    return row?.cnt || 0;
+    const r = await db.prepare(
+      `UPDATE audit_logs SET actor_name = ?, actor_id = ?, target_label = NULL, meta = NULL ${WHERE}`
+    ).run(ANON_LABEL, ANON_ID, cutoff, ANON_LABEL);
+    return r.changes || 0;
   } catch {
-    // Fallback sem actor_id (SQLite sem a coluna nullable)
-    await db.exec(`
-      UPDATE audit_logs
-      SET actor_name = '${ANON_LABEL}', target_label = NULL, meta = NULL
-      WHERE created_at < '${cutoff}' AND actor_name != '${ANON_LABEL}'
-    `);
-    const row = await db.prepare(
-      `SELECT COUNT(*) AS cnt FROM audit_logs WHERE created_at < ? AND actor_name = ?`
-    ).get(cutoff, ANON_LABEL);
-    return row?.cnt || 0;
+    // Fallback sem actor_id (schema em que a coluna continua NOT NULL)
+    const r = await db.prepare(
+      `UPDATE audit_logs SET actor_name = ?, target_label = NULL, meta = NULL ${WHERE}`
+    ).run(ANON_LABEL, cutoff, ANON_LABEL);
+    return r.changes || 0;
   }
 }

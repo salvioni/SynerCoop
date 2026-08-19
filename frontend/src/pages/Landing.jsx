@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { ApiError } from '../lib/api.js';
@@ -31,11 +31,119 @@ const PREVIEW = [
   { l: 'PMR', v: '1.433 dias', s: 'Crítico', c: 'var(--red-t)' },
 ];
 
+// ── Modais de Termos, Privacidade e Contato ─────────────────────────────────
+const LEGAL = {
+  termos: {
+    title: 'Termos de Uso',
+    content: (
+      <>
+        <p>Ao utilizar a plataforma SynerCoop você concorda com as condições descritas neste documento. Leia-o com atenção antes de prosseguir.</p>
+        <h3>1. Objeto</h3>
+        <p>A SynerCoop fornece ferramentas de análise financeira voltadas a cooperativas, escritórios contábeis, empresas e associações. Os dados inseridos são processados para geração de indicadores e relatórios.</p>
+        <h3>2. Responsabilidades do usuário</h3>
+        <p>O usuário é responsável pela veracidade das informações inseridas. A SynerCoop não se responsabiliza por decisões financeiras tomadas com base nos relatórios gerados.</p>
+        <h3>3. Propriedade intelectual</h3>
+        <p>Todo o conteúdo da plataforma — incluindo código, marca e design — é propriedade da SynerCoop. É proibida a reprodução sem autorização expressa.</p>
+        <h3>4. Privacidade</h3>
+        <p>O tratamento de dados pessoais segue nossa Política de Privacidade, disponível neste mesmo portal. Os dados são armazenados com criptografia e nunca vendidos a terceiros.</p>
+        <h3>5. Disponibilidade</h3>
+        <p>A plataforma é fornecida "como está". Fazemos o possível para manter alta disponibilidade, mas não garantimos acesso ininterrupto.</p>
+        <h3>6. Alterações</h3>
+        <p>Estes termos podem ser atualizados a qualquer momento. O uso continuado da plataforma após a publicação de alterações implica aceitação das novas condições.</p>
+        <p style={{ marginTop: 24, color: 'var(--t3)', fontSize: 12 }}>Última atualização: janeiro de 2026</p>
+      </>
+    ),
+  },
+  privacidade: {
+    title: 'Política de Privacidade',
+    content: (
+      <>
+        <p>A SynerCoop valoriza a privacidade dos seus usuários. Esta política descreve quais dados coletamos, como os utilizamos e como os protegemos.</p>
+        <h3>1. Dados coletados</h3>
+        <p>Coletamos nome, e-mail, dados da organização e informações financeiras inseridas voluntariamente. Também coletamos dados de uso da plataforma (páginas acessadas, horários) para fins de melhoria do serviço.</p>
+        <h3>2. Uso dos dados</h3>
+        <p>Os dados são usados exclusivamente para prestação do serviço contratado — geração de análises, autenticação e comunicações relacionadas à conta. Não compartilhamos dados pessoais com terceiros, exceto quando exigido por lei.</p>
+        <h3>3. Armazenamento e segurança</h3>
+        <p>Todos os dados são armazenados com criptografia em servidores localizados no Brasil. Senhas são armazenadas com hash irreversível (bcrypt). Aplicamos boas práticas de segurança da informação (OWASP).</p>
+        <h3>4. Seus direitos (LGPD)</h3>
+        <p>Conforme a Lei Geral de Proteção de Dados (Lei 13.709/2018), você tem direito a: acessar seus dados, corrigi-los, solicitar exclusão e revogar consentimentos. Para exercer esses direitos, entre em contato pelo e-mail abaixo.</p>
+        <h3>5. Cookies</h3>
+        <p>Usamos apenas cookies estritamente necessários para autenticação e funcionamento da plataforma. Não utilizamos cookies de rastreamento ou publicidade.</p>
+        <h3>6. Contato</h3>
+        <p>Dúvidas sobre privacidade: <a href="mailto:privacidade@synercoop.com.br" style={{ color: 'var(--blue-text)' }}>privacidade@synercoop.com.br</a></p>
+        <p style={{ marginTop: 24, color: 'var(--t3)', fontSize: 12 }}>Última atualização: janeiro de 2026</p>
+      </>
+    ),
+  },
+  contato: {
+    title: 'Contato',
+    content: (
+      <>
+        <p>Estamos aqui para ajudar. Escolha o canal mais adequado à sua necessidade:</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
+          {[
+            { icon: 'ti-mail', label: 'Suporte técnico', value: 'suporte@synercoop.com.br', href: 'mailto:suporte@synercoop.com.br' },
+            { icon: 'ti-shield', label: 'Privacidade e dados', value: 'privacidade@synercoop.com.br', href: 'mailto:privacidade@synercoop.com.br' },
+            { icon: 'ti-building', label: 'Parcerias e comercial', value: 'contato@synercoop.com.br', href: 'mailto:contato@synercoop.com.br' },
+          ].map(({ icon, label, value, href }) => (
+            <a key={label} href={href} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: 'var(--bg2)', borderRadius: 10, border: '1px solid var(--bd)', color: 'var(--t0)', textDecoration: 'none' }}>
+              <i className={`ti ${icon}`} style={{ fontSize: 22, color: 'var(--blue-text)', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 2 }}>{label}</div>
+                <div style={{ fontWeight: 500 }}>{value}</div>
+              </div>
+            </a>
+          ))}
+        </div>
+        <p style={{ marginTop: 24, fontSize: 13, color: 'var(--t2)' }}>Tempo médio de resposta: até 1 dia útil.</p>
+      </>
+    ),
+  },
+};
+
+function LegalModal({ k, onClose }) {
+  const entry = LEGAL[k];
+  if (!entry) return null;
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background: 'var(--bg1)', borderRadius: 14, border: '1px solid var(--bd)', width: '100%', maxWidth: 600, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(0,0,0,.25)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--bd)' }}>
+          <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 400, color: 'var(--t0)' }}>{entry.title}</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--t2)', cursor: 'pointer', padding: 4, display: 'flex', borderRadius: 6 }}>
+            <i className="ti ti-x" style={{ fontSize: 20 }} />
+          </button>
+        </div>
+        <div style={{ padding: '20px 24px', overflowY: 'auto', fontSize: 14, color: 'var(--t1)', lineHeight: 1.7 }}>
+          <style>{`
+            .legal-body h3 { font-family: var(--font-sans); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--t2); margin: 20px 0 6px }
+            .legal-body p  { margin: 0 0 10px }
+            .legal-body p:last-child { margin-bottom: 0 }
+          `}</style>
+          <div className="legal-body">{entry.content}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Landing() {
   const navigate = useNavigate();
   const { login } = useAuth();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [legal, setLegal] = useState(null); // 'termos' | 'privacidade' | 'contato'
+
+  // A landing page usa sempre o tema claro — é a identidade visual oficial.
+  // Remove a classe dark enquanto o componente estiver montado e restaura ao sair.
+  useEffect(() => {
+    const root = document.documentElement;
+    const wasDark = root.classList.contains('theme-dark');
+    root.classList.remove('theme-dark');
+    return () => { if (wasDark) root.classList.add('theme-dark'); };
+  }, []);
   // true enquanto o cliente insiste após uma falha de rede/502-504 — cobre o
   // "cold start" do backend gratuito (Render), que pode levar até ~1min pra
   // acordar após ficar inativo (ver fetchWithRetry em lib/api.js).
@@ -239,12 +347,16 @@ export default function Landing() {
             <span style={{ color: 'var(--t3)' }}>© 2026</span>
           </div>
           <div style={{ display: 'flex', gap: 24, fontSize: 14, color: 'var(--t2)' }}>
-            <a href="#" style={{ color: 'inherit' }}>Termos</a>
-            <a href="#" style={{ color: 'inherit' }}>Privacidade</a>
-            <a href="#" style={{ color: 'inherit' }}>Contato</a>
+            {['termos', 'privacidade', 'contato'].map(k => (
+              <button key={k} onClick={() => setLegal(k)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, fontSize: 'inherit', textTransform: 'capitalize' }}>
+                {k === 'termos' ? 'Termos' : k === 'privacidade' ? 'Privacidade' : 'Contato'}
+              </button>
+            ))}
           </div>
         </div>
       </footer>
+
+      {legal && <LegalModal k={legal} onClose={() => setLegal(null)} />}
     </div>
   );
 }

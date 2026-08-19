@@ -19,10 +19,16 @@ services:
       # Gerado automaticamente pelo Render — nunca hardcode isso no repo.
       - key: JWT_SECRET
         generateValue: true
+      # Banco externo (Supabase/Neon): preencher no painel com a connection
+      # string do provedor. O bloco `databases:` no fim deste arquivo cria um
+      # Postgres gerenciado pelo Render — o free tier dele EXPIRA em 90 dias e
+      # o banco é apagado, derrubando a API com ENOTFOUND no host `dpg-...`.
+      # Por isso a URL vem de fora por padrão.
       - key: DATABASE_URL
-        fromDatabase:
-          name: synercoop-db
-          property: connectionString
+        sync: false
+      # Obrigatório: sem isso o boot aborta em produção (ver seed.js).
+      - key: ADMIN_INITIAL_PASSWORD
+        sync: false
       # Preencher manualmente no painel do Render depois do primeiro deploy,
       # com a URL pública do serviço synercoop-frontend abaixo.
       - key: FRONTEND_URL
@@ -49,8 +55,6 @@ services:
         sync: false
       - key: ADMIN_EMAIL
         sync: false
-      - key: ADMIN_INITIAL_PASSWORD
-        sync: false
 
   # Frontend (Vite/React) — site estático servido via CDN do Render.
   - type: web
@@ -73,8 +77,12 @@ services:
       - key: VITE_FACEBOOK_APP_ID
         sync: false
 
-databases:
-  - name: synercoop-db
-    plan: free
-    databaseName: synercoop
-    user: synercoop
+# Postgres gerenciado pelo Render. Mantido comentado de propósito: no free
+# tier ele é apagado após 90 dias e a API cai com
+# `getaddrinfo ENOTFOUND dpg-...`. Preferir um Postgres externo (Supabase)
+# via DATABASE_URL. Descomente apenas se assinar um plano pago aqui.
+# databases:
+#   - name: synercoop-db
+#     plan: free
+#     databaseName: synercoop
+#     user: synercoop

@@ -37,6 +37,8 @@ export default function NewAnalysis() {
   const [hintArrow, setHintArrow] = useState(null);
   const [loadingStep, setLoadingStep] = useState(0);
   const [loadingPct, setLoadingPct] = useState(0);
+  const [aiMsgIdx, setAiMsgIdx] = useState(0);
+  const [clientAnalyses, setClientAnalyses] = useState([]);
   const fileRef = useRef(null);
   const step1WrapRef = useRef(null);
   const addClientBtnRef = useRef(null);
@@ -54,6 +56,14 @@ export default function NewAnalysis() {
   );
 
   const selectedClient = clients.find(c => c.id === clientId);
+
+  // Busca análises existentes do cliente selecionado assim que ele é escolhido
+  // pra mostrar os períodos já cadastrados ANTES de o usuário perder tempo enviando
+  // um arquivo duplicado.
+  useEffect(() => {
+    if (!clientId) { setClientAnalyses([]); return; }
+    api.get(`/analyses?clientId=${clientId}&limit=50`).then(r => setClientAnalyses(r.analyses || [])).catch(() => {});
+  }, [clientId]);
 
   const showEmptyHint = step === 1 && !loadingClients && !search && !filtered.length;
 
@@ -173,6 +183,17 @@ export default function NewAnalysis() {
     }
   }
 
+  const AI_MESSAGES = [
+    'Interpretando margens de sobra…',
+    'Analisando liquidez e endividamento…',
+    'Calculando índices de rentabilidade…',
+    'Avaliando ciclo financeiro…',
+    'Redigindo diagnóstico por pilar…',
+    'Formulando recomendações estratégicas…',
+    'Revisando consistência dos dados…',
+    'Finalizando parecer financeiro…',
+  ];
+
   // Avança etapas visuais automaticamente enquanto o step 3 processa
   useEffect(() => {
     if (step !== 3) { setLoadingStep(0); setLoadingPct(0); return; }
@@ -185,8 +206,28 @@ export default function NewAnalysis() {
     const timers = schedule.map(({ delay, s, pct }) =>
       setTimeout(() => { setLoadingStep(s); setLoadingPct(pct); }, delay)
     );
-    return () => timers.forEach(clearTimeout);
+    // Após atingir 92%, avança lentamente até 99% pra não parecer travado
+    const creepHandle = { id: null };
+    const creepStart = setTimeout(() => {
+      let pct = 92;
+      creepHandle.id = setInterval(() => {
+        pct = Math.min(99, pct + 0.8);
+        setLoadingPct(Math.round(pct));
+      }, 3000);
+    }, 24000);
+    return () => {
+      timers.forEach(clearTimeout);
+      clearTimeout(creepStart);
+      if (creepHandle.id) clearInterval(creepHandle.id);
+    };
   }, [step]);
+
+  // Rotaciona mensagens descritivas enquanto a IA está gerando
+  useEffect(() => {
+    if (loadingStep < 3) { setAiMsgIdx(0); return; }
+    const t = setInterval(() => setAiMsgIdx(i => (i + 1) % AI_MESSAGES.length), 3500);
+    return () => clearInterval(t);
+  }, [loadingStep]);
 
   const plan = getPlan(accountInfo?.plan);
   const monthlyUsed = accountInfo?.monthlyAnalyses ?? 0;
@@ -293,10 +334,13 @@ export default function NewAnalysis() {
                     transition: 'border-color .12s',
                   }}>
                   <div style={{
-                    width: 36, height: 36, borderRadius: 8, background: 'var(--blue)', color: '#fff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 500, flexShrink: 0,
+                    width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 500,
+                    background: c.logo ? 'transparent' : (c.logo_color || 'var(--blue)'),
+                    color: '#fff',
+                    ...(c.logo ? { backgroundImage: `url(${c.logo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}),
                   }}>
-                    {c.name.charAt(0).toUpperCase()}
+                    {!c.logo && c.name.charAt(0).toUpperCase()}
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t0)' }}>{c.name}</div>
@@ -324,6 +368,17 @@ export default function NewAnalysis() {
               </button>
             )}
           </div>
+
+          {clientAnalyses.length > 0 && (
+            <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 8, fontSize: 13, color: 'var(--t1)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <i className="ti ti-info-circle" style={{ color: 'var(--blue)', flexShrink: 0, marginTop: 1 }}></i>
+              <span>
+                Este cliente já tem {clientAnalyses.length === 1 ? 'uma análise' : `${clientAnalyses.length} análises`}:{' '}
+                <strong>{clientAnalyses.map(a => a.period_label || String(a.year)).join(', ')}</strong>.
+                {' '}Envie apenas se for um período diferente.
+              </span>
+            </div>
+          )}
 
           <div
             className={`upload-zone${drag ? ' drag' : ''}`}
@@ -407,7 +462,7 @@ export default function NewAnalysis() {
               <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t0)', marginBottom: 4 }}>
                 Processando análise de <strong>{selectedClient?.name}</strong>
               </div>
-              <div style={{ fontSize: 13, color: 'var(--t2)' }}>Isso pode levar até 30 segundos — não feche esta aba</div>
+              <div style={{ fontSize: 13, color: 'var(--t2)' }}>Analisando o documento com IA — não feche esta aba</div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
@@ -435,12 +490,19 @@ export default function NewAnalysis() {
                         : <i className={`ti ${s.icon}`} style={{ fontSize: 15, color: active ? 'var(--blue)' : 'var(--t3)' }} />
                       }
                     </div>
-                    <span style={{
-                      fontSize: 14, flex: 1,
-                      fontWeight: done || active ? 500 : 400,
-                      color: done || active ? 'var(--t0)' : 'var(--t2)',
-                      transition: 'color .3s',
-                    }}>{s.label}</span>
+                    <div style={{ flex: 1 }}>
+                      <span style={{
+                        fontSize: 14, display: 'block',
+                        fontWeight: done || active ? 500 : 400,
+                        color: done || active ? 'var(--t0)' : 'var(--t2)',
+                        transition: 'color .3s',
+                      }}>{s.label}</span>
+                      {active && i === 3 && (
+                        <span style={{ fontSize: 11, color: 'var(--t2)', display: 'block', marginTop: 3, transition: 'opacity .4s' }}>
+                          {AI_MESSAGES[aiMsgIdx]}
+                        </span>
+                      )}
+                    </div>
                     {active && <i className="ti ti-loader" style={{ fontSize: 16, color: 'var(--blue)', animation: 'spin .8s linear infinite', flexShrink: 0 }} />}
                     {done  && <i className="ti ti-circle-check" style={{ fontSize: 16, color: 'var(--green-t, #16a34a)', flexShrink: 0 }} />}
                   </div>

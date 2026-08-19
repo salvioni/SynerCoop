@@ -6,8 +6,7 @@ import { getPlan } from '../lib/plans.js';
 import UserAvatar from '../components/UserAvatar.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import ClientDashboard from '../components/ClientDashboard.jsx';
-import { periodLabel } from '../lib/period.js';
-import { SIGNING_ENABLED } from '../lib/constants.js';
+import AnalysisRow from '../components/AnalysisRow.jsx';
 
 function greeting() {
   const h = new Date().getHours();
@@ -26,7 +25,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (isSingleEntity) return;
     api.get('/stats').then(setStats).catch(() => {});
-    api.get('/analyses?limit=5').then(r => setAnalyses(r.analyses || [])).catch(() => {});
+    api.get('/analyses?limit=4').then(r => setAnalyses(r.analyses || [])).catch(() => {});
     // Convites ainda não aceitos não contam como membro ativo do escritório.
     api.get('/users').then(r => setUsers((r.users || []).filter(u => !u.invite_pending))).catch(() => {});
   }, [isSingleEntity]);
@@ -34,7 +33,7 @@ export default function Dashboard() {
   // Contas de entidade única (cooperativa/empresa/associação/outro) não têm
   // uma carteira de clientes — a "Visão geral" é direto o painel do cliente
   // espelhado na conta.
-  if (isSingleEntity) return <ClientDashboard clientId={user.self_client_id} allowDelete={false} />;
+  if (isSingleEntity) return <ClientDashboard clientId={user.self_client_id} allowDelete={false} hideHeader />;
 
   const firstName = user?.name?.split(' ')[0] || '';
   const plan = getPlan(stats?.plan || user?.plan);
@@ -72,17 +71,7 @@ export default function Dashboard() {
             </span>
           </div>
           {analyses.length ? analyses.map(a => (
-            <div key={a.id} className="dash-analysis-row" onClick={() => navigate(`/app/analyses/${a.id}`)} style={{ cursor: 'pointer' }}>
-              <div className="dash-analysis-info">
-                <div className="dash-analysis-name">{a.client_name || 'Cliente'}</div>
-                <div className="dash-analysis-meta">
-                  {periodLabel(a)} · {new Date(a.created_at).toLocaleDateString('pt-BR')}
-                </div>
-              </div>
-              {SIGNING_ENABLED && (
-                <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{a.status === 'signed' ? 'Assinada' : 'Editável'}</span>
-              )}
-            </div>
+            <AnalysisRow key={a.id} analysis={a} compact />
           )) : (
             <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--t3)', fontSize: 14 }}>
               Nenhuma análise recente.
@@ -105,7 +94,11 @@ export default function Dashboard() {
           <div style={{ marginBottom: 20, marginTop: 32 }}>
             <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--t2)', fontWeight: 500, marginBottom: 10 }}>Membros</div>
             <div style={{ display: 'flex' }}>
-              {(users.length ? users : [{ id: 'me', name: user?.name || 'Eu', avatar: user?.avatar, avatar_color: user?.avatar_color }]).slice(0, 4).map((u, i) => (
+              {[
+                // Usuário logado sempre primeiro com dados frescos do contexto de auth
+                { id: user.id, name: user.name, avatar: user.avatar, avatar_color: user.avatar_color },
+                ...users.filter(u => u.id !== user.id),
+              ].slice(0, 4).map((u, i) => (
                 <div key={u.id} style={{ marginLeft: i > 0 ? -8 : 0, border: '2px solid var(--bg1)', borderRadius: 999 }}>
                   <UserAvatar user={u} size={36} />
                 </div>

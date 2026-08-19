@@ -79,8 +79,16 @@ export function periodSlug(year, periodLabel) {
 // documento — se divergem, o documento é a fonte mais confiável do ano em si,
 // e não arriscamos rotular um período que pode estar errado.
 export function mergePeriod(extractedYear, extractedLabel, filenamePeriod) {
-  if (filenamePeriod && (!extractedYear || filenamePeriod.year === extractedYear)) {
-    return { year: filenamePeriod.year || extractedYear, period_label: filenamePeriod.label || extractedLabel || null };
+  if (filenamePeriod) {
+    const yearsMatch = !extractedYear || filenamePeriod.year === extractedYear;
+    // Quando o nome do arquivo indica um ano MENOR que o extraído pela IA,
+    // priorizamos o arquivo — a IA tende a capturar o ano de impressão/
+    // assinatura do documento em vez do exercício fiscal real
+    // (ex: balanço de 2024 assinado e enviado em 2025 → IA retorna 2025).
+    const filenameMoreLikely = extractedYear && filenamePeriod.year < extractedYear;
+    if (yearsMatch || filenameMoreLikely) {
+      return { year: filenamePeriod.year || extractedYear, period_label: filenamePeriod.label || extractedLabel || null };
+    }
   }
   return { year: extractedYear, period_label: extractedLabel || null };
 }

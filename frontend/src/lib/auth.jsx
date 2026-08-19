@@ -4,8 +4,15 @@ import { api, setToken, setRefreshToken, getRefreshToken, ApiError } from './api
 const AuthCtx = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Atualiza o state e notifica o ThemeProvider para trocar para o tema
+  // salvo na conta deste usuário (ou null ao deslogar).
+  function setUser(u) {
+    setUserState(u);
+    window.dispatchEvent(new CustomEvent('auth:user-changed', { detail: { userId: u?.id ?? null } }));
+  }
 
   // Ao carregar o app, tenta recuperar a sessão se houver token salvo.
   useEffect(() => {

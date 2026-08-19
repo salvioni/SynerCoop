@@ -16,7 +16,7 @@ export default function AnalysesList() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [yearFilter, setYearFilter] = useState('');
+  const [periodFilter, setPeriodFilter] = useState('');
   const [confirm, setConfirm] = useState(null);
   const [deleteErr, setDeleteErr] = useState('');
 
@@ -34,12 +34,16 @@ export default function AnalysesList() {
     } catch (e) { setDeleteErr(e.message || 'Erro ao excluir análise.'); }
   }
 
-  const years = [...new Set(analyses.map(a => a.year))].sort((a, b) => b - a);
+  // Período = period_label quando existir (ex: "1º Trimestre de 2025"), senão o ano inteiro.
+  const periods = [...new Map(analyses.map(a => {
+    const key = a.period_label || String(a.year);
+    return [key, { key, label: key, year: a.year }];
+  })).values()].sort((a, b) => b.year - a.year || a.label.localeCompare(b.label, 'pt-BR'));
 
   const filtered = analyses.filter(a => {
     if (search && !(a.client_name || '').toLowerCase().includes(search.toLowerCase())) return false;
     if (SIGNING_ENABLED && statusFilter && a.status !== statusFilter) return false;
-    if (yearFilter && a.year !== Number(yearFilter)) return false;
+    if (periodFilter && (a.period_label || String(a.year)) !== periodFilter) return false;
     return true;
   });
 
@@ -72,13 +76,13 @@ export default function AnalysesList() {
           />
         )}
         <FilterSelect
-          placeholder="Todos anos"
-          value={yearFilter}
-          onChange={setYearFilter}
+          placeholder="Todos períodos"
+          value={periodFilter}
+          onChange={setPeriodFilter}
           searchable={false}
           options={[
-            { value: '', label: 'Todos anos' },
-            ...years.map(y => ({ value: String(y), label: String(y) })),
+            { value: '', label: 'Todos períodos' },
+            ...periods.map(p => ({ value: p.key, label: p.label })),
           ]}
         />
       </div>

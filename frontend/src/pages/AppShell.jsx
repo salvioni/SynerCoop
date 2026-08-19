@@ -12,8 +12,6 @@ export default function AppShell() {
   if (!user) return null;
   const plan = getPlan(accountInfo?.plan || user.plan);
   const tenantTypeLabel = TENANT_TYPES.find(t => t.value === user.tenant_type)?.label;
-  const monthly = accountInfo?.monthlyAnalyses ?? 0;
-  const pctUsed = plan.limit === Infinity ? 0 : Math.min(100, Math.round((monthly / plan.limit) * 100));
   function doLogout() { logout(); navigate('/login', { replace: true }); }
 
   return (
@@ -29,7 +27,7 @@ export default function AppShell() {
 
         <div className="s-office">
           <div className="s-office-label">{tenantTypeLabel || 'Escritório'}</div>
-          <div className="s-office-name">{user.tenant_name || 'Meu Escritório'}</div>
+          <div className="s-office-name">{accountInfo?.companyName || user.tenant_name || 'Meu Escritório'}</div>
           <div className="s-office-plan">Plano {plan.label}</div>
         </div>
 
@@ -60,21 +58,6 @@ export default function AppShell() {
         </nav>
 
         <div className="s-foot">
-          <div className="s-card-analyses">
-            <div className="s-meter-row">
-              <span>Análises este mês</span>
-              <span>{monthly}/{plan.limit === Infinity ? '∞' : plan.limit}</span>
-            </div>
-            <div className="s-meter-bar">
-              <div className="s-meter-fill" style={{ width: `${pctUsed}%` }}></div>
-            </div>
-            {plan.limit !== Infinity && (
-              <div className="s-upgrade">
-                <i className="ti ti-sparkles"></i> Upgrade para Enterprise
-              </div>
-            )}
-          </div>
-
           <div className="s-user">
             <UserAvatar user={user} size={36} />
             <div className="s-uname">
