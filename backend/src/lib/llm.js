@@ -95,6 +95,6 @@ export function parseJsonFromLLM(raw) {
   const end = text.lastIndexOf('}');
   if (start >= 0 && end > start) text = text.substring(start, end + 1);
   text = text.replace(/,\s*([}\]])/g, '$1');
-  text = text.replace(/:\s*NaN/g, ': 0');
+  text = text.replace(/:\s*NaN/g, ': null');
   return JSON.parse(text);
 }

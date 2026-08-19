@@ -6,7 +6,8 @@ import {
   convertInchesToTwip, ImageRun, Footer, PageNumber
 } from 'docx';
 import { imageSize } from 'image-size';
-import { generateText, parseJsonFromLLM } from './llm.js';
+import { parseJsonFromLLM } from './llm.js';
+import { buildNarrativePrompt, generateAnalysisNarrative } from './narrative.js';
 
 const LOGO_MIME_TO_DOCX_TYPE = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/bmp': 'bmp' };
 const LOGO_MAX_WIDTH = 160;
@@ -47,71 +48,9 @@ function buildLogoImage(logoDataUrl) {
   });
 }
 
-const REPORT_PROMPT = `Você é um analista financeiro especializado em cooperativas brasileiras.
-
-Com base nos indicadores financeiros abaixo, gere um relatório de análise detalhado e profissional.
-
-Empresa: {company_name}
-Tipo: {company_type}
-Exercício: {year}
-
-INDICADORES CALCULADOS:
-{indicators_json}
-
-VALORES DO BALANÇO PATRIMONIAL:
-{bp_json}
-
-VALORES DO DSP:
-{dsp_json}
-
-Retorne SOMENTE um JSON válido (sem texto antes ou depois) com esta estrutura:
-
-{
-  "sumario_executivo": "Parágrafo de 3-5 frases resumindo a situação financeira geral da empresa/cooperativa.",
-  "liquidez": "Parágrafo analisando os índices de liquidez geral, liquidez corrente, liquidez seca e imobilização. Cite os valores exatos.",
-  "rentabilidade": "Parágrafo analisando ROE, ROA, rentabilidade dos ingressos e EBITDA. Cite os valores exatos.",
-  "endividamento": "Parágrafo analisando endividamento total, perfil, alavancagem e estrutura de capital. Cite os valores exatos.",
-  "capacidade_operacional": "Parágrafo analisando PME, PMR, PMP, ciclo financeiro e giro do ativo. Cite os valores exatos.",
-  "tesouraria": "Parágrafo analisando capital de giro, NCG, tesouraria e independência financeira. Cite os valores exatos.",
-  "forcas": "1-2 frases sobre os pontos fortes identificados.",
-  "fraquezas": "1-2 frases sobre os pontos de atenção críticos.",
-  "riscos": "1-2 frases sobre os riscos identificados.",
-  "recomendacoes": [
-    "Recomendação 1 com título curto: descrição da ação necessária.",
-    "Recomendação 2 com título curto: descrição da ação necessária.",
-    "Recomendação 3 com título curto: descrição da ação necessária.",
-    "Recomendação 4 com título curto: descrição da ação necessária."
-  ]
-}
-
-Regras:
-- Use linguagem profissional mas acessível para contadores e diretores de cooperativa
-- Cooperativas usam "sobras/perdas" em vez de "lucro/prejuízo", "ingressos" em vez de "receita"
-- Seja específico: cite os valores exatos dos indicadores
-- Identifique claramente o que é positivo, o que é preocupante e o que é crítico
-- As recomendações devem ser práticas e acionáveis
-- Campos com valor null (nos INDICADORES/VALORES DO BALANÇO PATRIMONIAL/DSP acima)
-  não foram encontrados no documento original — é diferente de valer zero. NUNCA
-  afirme que esses campos valem zero ou que "não há" o que quer que seja com base
-  neles (ex: não diga "a cooperativa não tem empréstimos" se o campo é null — diga
-  que a informação não estava disponível no documento, ou simplesmente não cite esse valor)
-- Se a maioria dos indicadores vier null, isso significa que o documento não tinha
-  dados suficientes para a análise — NÃO invente uma narrativa (ex: "a cooperativa
-  está inativa/foi dissolvida"). Nesse caso, o sumário executivo deve dizer
-  objetivamente que os dados disponíveis são insuficientes para uma análise completa`;
-
-async function generateNarrative(companyName, companyType, year, indicators, bp, dsp) {
-  const prompt = REPORT_PROMPT
-    .replace('{company_name}', companyName)
-    .replace('{company_type}', companyType)
-    .replace('{year}', year)
-    .replace('{indicators_json}', JSON.stringify(indicators, null, 2))
-    .replace('{bp_json}', JSON.stringify(bp, null, 2))
-    .replace('{dsp_json}', JSON.stringify(dsp, null, 2));
-
-  const raw = await generateText(prompt);
-  return parseJsonFromLLM(raw);
-}
+// O prompt de narrativa e a função de geração vivem em narrative.js —
+// importados aqui para que o download do Word use exatamente o mesmo prompt
+// que a UI usa ao gerar/regenerar a análise.
 
 const NAVY = '0D1E3B';
 const GRAY = '5C646F';
@@ -318,6 +257,6 @@ async function buildDocx(companyName, companyType, year, narrative, logo, signat
 }
 
 export async function generateReport(companyName, companyType, year, indicators, bp, dsp, existingNarrative, logo, signature, periodLabel) {
-  const narrative = existingNarrative || await generateNarrative(companyName, companyType, year, indicators, bp, dsp);
+  const narrative = existingNarrative || await generateAnalysisNarrative({ companyName, companyType, year, indicators, bp, dsp });
   return buildDocx(companyName, companyType, year, narrative, logo, signature, periodLabel);
 }

@@ -1,4 +1,4 @@
-// Cliente HTTP para a API FinAnalyze.
+// Cliente HTTP para a API SynerCoop.
 // Lê o endereço da API de VITE_API_URL ou usa localhost:4000 como padrão.
 
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
@@ -34,14 +34,66 @@ async function fetchWithRetry(url, options, onRetry) {
   }
 }
 
+// ─── Token storage ──────────────────────────────────────────────────────────
+
+const ACCESS_TOKEN_KEY = 'finanalyze_token';
+const REFRESH_TOKEN_KEY = 'finanalyze_refresh';
+
 function getToken() {
-  return localStorage.getItem('finanalyze_token');
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
 }
 
 export function setToken(t) {
-  if (t) localStorage.setItem('finanalyze_token', t);
-  else localStorage.removeItem('finanalyze_token');
+  if (t) localStorage.setItem(ACCESS_TOKEN_KEY, t);
+  else localStorage.removeItem(ACCESS_TOKEN_KEY);
 }
+
+export function getRefreshToken() {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function setRefreshToken(t) {
+  if (t) localStorage.setItem(REFRESH_TOKEN_KEY, t);
+  else localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+// ─── Token refresh (singleton) ───────────────────────────────────────────────
+// Uma única Promise em andamento para evitar múltiplas chamadas paralelas
+// de refresh quando várias requisições 401 chegam ao mesmo tempo.
+
+let _refreshing = null;
+
+async function attemptTokenRefresh() {
+  if (_refreshing) return _refreshing;
+
+  const rawRefresh = getRefreshToken();
+  if (!rawRefresh) throw new Error('no_refresh_token');
+
+  _refreshing = fetch(`${BASE}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: rawRefresh }),
+  })
+    .then(async res => {
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error('refresh_failed');
+      setToken(data.token);
+      setRefreshToken(data.refreshToken);
+      return data.token;
+    })
+    .finally(() => { _refreshing = null; });
+
+  return _refreshing;
+}
+
+// Limpa sessão local e avisa o AuthProvider para atualizar o estado React.
+function clearAuthAndNotify() {
+  setToken(null);
+  setRefreshToken(null);
+  window.dispatchEvent(new CustomEvent('auth:session-expired'));
+}
+
+// ─── Error helper ────────────────────────────────────────────────────────────
 
 // Lança ApiError se a resposta não for 2xx. Único lugar que interpreta o
 // corpo de erro da API — usado por apiCall, uploadFile e downloadFile para
@@ -57,7 +109,9 @@ function throwIfError(res, data) {
   throw new ApiError(res.status, data?.error || `Erro ${res.status}`, data?.fields || null, null, data);
 }
 
-export async function apiCall(method, path, body, { onRetry } = {}) {
+// ─── Core request ────────────────────────────────────────────────────────────
+
+export async function apiCall(method, path, body, { onRetry, _retry } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -73,6 +127,17 @@ export async function apiCall(method, path, body, { onRetry } = {}) {
     throw new ApiError(0, 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.', null, e);
   }
 
+  // 401 — tenta renovar o access token via refresh token (uma vez).
+  if (res.status === 401 && !_retry) {
+    try {
+      await attemptTokenRefresh();
+      return apiCall(method, path, body, { onRetry, _retry: true });
+    } catch {
+      clearAuthAndNotify();
+      throw new ApiError(401, 'Sessão expirada. Faça login novamente.', null, null, null);
+    }
+  }
+
   let data = null;
   try { data = await res.json(); } catch { /* sem corpo */ }
 
@@ -86,7 +151,7 @@ export async function apiCall(method, path, body, { onRetry } = {}) {
  * @param {File} file - objeto File do input
  * @param {object} [extra] - campos adicionais (chave: valor)
  */
-export async function uploadFile(path, file, extra = {}, onRetry) {
+export async function uploadFile(path, file, extra = {}, onRetry, _retry = false) {
   const token = getToken();
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -104,6 +169,16 @@ export async function uploadFile(path, file, extra = {}, onRetry) {
     throw new ApiError(0, 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.', null, e);
   }
 
+  if (res.status === 401 && !_retry) {
+    try {
+      await attemptTokenRefresh();
+      return uploadFile(path, file, extra, onRetry, true);
+    } catch {
+      clearAuthAndNotify();
+      throw new ApiError(401, 'Sessão expirada. Faça login novamente.', null, null, null);
+    }
+  }
+
   let data = null;
   try { data = await res.json(); } catch { /* sem corpo */ }
 
@@ -115,7 +190,7 @@ export async function uploadFile(path, file, extra = {}, onRetry) {
  * Download de arquivo binário (Word, PDF etc.)
  * @returns {Promise<Blob>}
  */
-export async function downloadFile(path, onRetry) {
+export async function downloadFile(path, onRetry, _retry = false) {
   const token = getToken();
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -125,6 +200,16 @@ export async function downloadFile(path, onRetry) {
     res = await fetchWithRetry(`${BASE}${path}`, { headers }, onRetry);
   } catch (e) {
     throw new ApiError(0, 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.', null, e);
+  }
+
+  if (res.status === 401 && !_retry) {
+    try {
+      await attemptTokenRefresh();
+      return downloadFile(path, onRetry, true);
+    } catch {
+      clearAuthAndNotify();
+      throw new ApiError(401, 'Sessão expirada. Faça login novamente.', null, null, null);
+    }
   }
 
   if (!res.ok) {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
-import { api } from '../lib/api.js';
+import { api, setToken, setRefreshToken } from '../lib/api.js';
 import { initials } from '../components/UserAvatar.jsx';
 
 const THEMES = [
@@ -92,8 +92,12 @@ export default function Account() {
     setPwErrs({});
     setPwMsg('');
     try {
-      await api.post('/account/change-password', { current: pw.current, next: pw.next });
-      setPwMsg('Senha alterada com sucesso.');
+      const d = await api.post('/account/change-password', { current: pw.current, next: pw.next });
+      // Salva o novo par de tokens — mantém a sessão atual ativa mesmo após
+      // a troca de senha invalidar todos os outros tokens em circulação.
+      if (d.token) setToken(d.token);
+      if (d.refreshToken) setRefreshToken(d.refreshToken);
+      setPwMsg('Senha alterada com sucesso. Outras sessões foram encerradas.');
       setPw({ current: '', next: '', confirm: '' });
     } catch (e) {
       if (e.fields) setPwErrs(e.fields);
@@ -127,7 +131,7 @@ export default function Account() {
         {info && (
           <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 10, padding: 16, marginBottom: 12 }}>
             <div className="sec-title">Escritório</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+            <div className="acct-office-grid">
               {[
                 { label: 'Nome', val: info.companyName },
                 { label: 'Clientes ativos', val: info.activeClients },

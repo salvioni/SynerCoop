@@ -115,6 +115,7 @@ export default function AnalysisView() {
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [signing, setSigning] = useState(false);
+  const [actionErr, setActionErr] = useState('');
   const goBack = useBackNavigate(analysis ? `/app/clients/${analysis.client_id}` : '/app/clients');
 
   useEffect(() => {
@@ -134,7 +135,7 @@ export default function AnalysisView() {
   async function saveNarrative() {
     setSaving(true);
     try { await api.patch(`/analyses/${id}/narrative`, { narrative }); setEditMode(false); }
-    catch (e) { alert(e.message); }
+    catch (e) { setActionErr(e.message || 'Erro ao salvar narrativa.'); }
     finally { setSaving(false); }
   }
 
@@ -163,9 +164,8 @@ export default function AnalysisView() {
   }
 
   async function doDelete() {
-    setConfirm(null);
     try { await api.del(`/analyses/${id}`); navigate(`/app/clients/${analysis.client_id}`, { replace: true }); }
-    catch (e) { alert(e.message); }
+    catch (e) { setActionErr(e.message || 'Erro ao excluir análise.'); }
   }
 
   async function signAnalysis() {
@@ -173,7 +173,7 @@ export default function AnalysisView() {
     try {
       const r = await api.post(`/analyses/${id}/sign`);
       setAnalysis(a => ({ ...a, status: 'signed', signed_at: r.signed_at, signed_by_name: r.signed_by_name }));
-    } catch (e) { alert(e.message); }
+    } catch (e) { setActionErr(e.message || 'Erro ao assinar.'); }
     finally { setSigning(false); }
   }
 
@@ -182,7 +182,7 @@ export default function AnalysisView() {
     try {
       await api.del(`/analyses/${id}/sign`);
       setAnalysis(a => ({ ...a, status: 'editable', signed_at: null, signed_by_name: null }));
-    } catch (e) { alert(e.message); }
+    } catch (e) { setActionErr(e.message || 'Erro ao revogar assinatura.'); }
     finally { setSigning(false); }
   }
 
@@ -215,7 +215,7 @@ export default function AnalysisView() {
               </span>
             )}
           </p>
-          <h1>Análise Financeira</h1>
+          <h1 className="page-h1">Análise Financeira</h1>
         </div>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
           {SIGNING_ENABLED && (analysis.status === 'signed' ? (
@@ -260,6 +260,7 @@ export default function AnalysisView() {
       )}
 
       {reportErr && <div className="err-banner" style={{ marginBottom: 16 }}>{reportErr}</div>}
+      {actionErr && <div className="err-banner" style={{ marginBottom: 16 }}>{actionErr}</div>}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 24, overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 2 }}>
@@ -659,7 +660,7 @@ export default function AnalysisView() {
               <thead><tr><th>Descrição</th><th className="r">R$</th><th className="r">AV%</th></tr></thead>
               <tbody>
                 <tr className="ft-group"><td>Passivo Circulante</td><td className="r">{fmtT(bp.passivo_circulante)}</td><td className="pct">{avPct(bp.passivo_circulante, totalAtivo)}</td></tr>
-                {bp.passivo_exigivel_lp != null && <tr className="ft-group"><td>Passivo Não Circulante</td><td className="r">{fmtT(bp.passivo_exigivel_lp)}</td><td className="pct">{avPct(bp.passivo_exigivel_lp, totalAtivo)}</td></tr>}
+                {(bp.total_passivo_nao_circulante ?? bp.passivo_nao_circulante ?? bp.passivo_exigivel_lp) != null && (() => { const pnc = bp.total_passivo_nao_circulante ?? bp.passivo_nao_circulante ?? bp.passivo_exigivel_lp; return <tr className="ft-group"><td>Passivo Não Circulante</td><td className="r">{fmtT(pnc)}</td><td className="pct">{avPct(pnc, totalAtivo)}</td></tr>; })()}
                 <tr className="ft-group"><td>Patrimônio Líquido</td><td className="r">{fmtT(bp.patrimonio_liquido)}</td><td className="pct">{avPct(bp.patrimonio_liquido, totalAtivo)}</td></tr>
                 <tr className="ft-total"><td>TOTAL PASSIVO + PL</td><td className="r">{fmtT(bp.total_passivo_pl)}</td><td className="pct">100,0%</td></tr>
               </tbody>

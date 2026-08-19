@@ -32,8 +32,11 @@ export default function NewAnalysis() {
   const [drag, setDrag] = useState(false);
   const [err, setErr] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [inadimplencia, setInadimplencia] = useState('');
   const [clientModal, setClientModal] = useState(false);
   const [hintArrow, setHintArrow] = useState(null);
+  const [loadingStep, setLoadingStep] = useState(0);
+  const [loadingPct, setLoadingPct] = useState(0);
   const fileRef = useRef(null);
   const step1WrapRef = useRef(null);
   const addClientBtnRef = useRef(null);
@@ -119,10 +122,33 @@ export default function NewAnalysis() {
     try {
       const r = await uploadFile(`/clients/${clientId}/extract`, file);
       const ex = r.extracted;
+
+      // Verificar se o arquivo contém dados financeiros mínimos.
+      // Arquivos não financeiros (contratos, atas, relatórios narrativos) ou
+      // ilegíveis retornam quase todos os campos como null — mostrar aviso
+      // claro em vez de salvar uma análise vazia.
+      const bpNonNull = Object.values(ex.bp || {}).filter(v => v != null).length;
+      const dspNonNull = Object.values(ex.dsp || {}).filter(v => v != null).length;
+      if (bpNonNull + dspNonNull < 3) {
+        setErr(
+          'Não encontramos dados financeiros neste arquivo. Verifique se é um ' +
+          'balanço patrimonial ou demonstrativo de resultado de uma cooperativa, ' +
+          'e que o documento está legível. Se o PDF for escaneado (imagem), ' +
+          'tente exportar em Excel ou usar um PDF gerado pelo sistema contábil.'
+        );
+        setProcessing(false);
+        setStep(2);
+        return;
+      }
+
       const bpClean = {};
       const dspClean = {};
       Object.entries(ex.bp || {}).forEach(([k, v]) => { if (v != null) bpClean[k] = Number(v) || 0; });
       Object.entries(ex.dsp || {}).forEach(([k, v]) => { if (v != null) dspClean[k] = Number(v) || 0; });
+      // inadimplência é dado gerencial (não vem do documento) — adicionado
+      // separadamente ao DSP quando o usuário informa antes de enviar.
+      const inadPct = parseFloat(inadimplencia);
+      if (!isNaN(inadPct) && inadPct >= 0) dspClean.inadimplencia_pct = inadPct / 100;
       const saved = await api.post(`/clients/${clientId}/analyses`, {
         bp: bpClean, dsp: dspClean, year: ex.year || new Date().getFullYear(),
         confidence: ex.confidence, notes: ex.notes, detail: ex.detail || null,
@@ -146,6 +172,21 @@ export default function NewAnalysis() {
       setStep(2);
     }
   }
+
+  // Avança etapas visuais automaticamente enquanto o step 3 processa
+  useEffect(() => {
+    if (step !== 3) { setLoadingStep(0); setLoadingPct(0); return; }
+    const schedule = [
+      { delay: 600,   s: 1, pct: 15 },
+      { delay: 4000,  s: 2, pct: 45 },
+      { delay: 12000, s: 3, pct: 75 },
+      { delay: 24000, s: 4, pct: 92 },
+    ];
+    const timers = schedule.map(({ delay, s, pct }) =>
+      setTimeout(() => { setLoadingStep(s); setLoadingPct(pct); }, delay)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [step]);
 
   const plan = getPlan(accountInfo?.plan);
   const monthlyUsed = accountInfo?.monthlyAnalyses ?? 0;
@@ -177,7 +218,7 @@ export default function NewAnalysis() {
         <i className="ti ti-arrow-left"></i> Voltar
       </button>
 
-      <h1 style={{ marginBottom: 8 }}>Nova análise</h1>
+      <h1 className="page-h1" style={{ marginBottom: 8 }}>Nova análise</h1>
       <p style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 32 }}>
         Suba o balanço da empresa cliente — a IA extrai os dados e calcula os indicadores.
       </p>
@@ -307,6 +348,35 @@ export default function NewAnalysis() {
             )}
           </div>
 
+          {/* Campo de inadimplência — dado gerencial que não consta no balanço.
+              Relevante especialmente para cooperativas de crédito e análise de
+              carteira. Aparece sempre (independente de ter arquivo selecionado)
+              pra o usuário poder preencher enquanto escolhe o arquivo. */}
+          <div style={{ marginTop: 20, padding: '16px', background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t0)' }}>Taxa de inadimplência</span>
+              <span style={{ fontSize: 12, color: 'var(--t3)' }}>opcional</span>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--t2)', margin: '0 0 10px' }}>
+              Percentual de inadimplência da carteira — dado gerencial que não consta no balanço.
+              Quando informado, aparece nos indicadores de liquidez e na narrativa.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                className="inp"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                placeholder="0,00"
+                value={inadimplencia}
+                onChange={e => setInadimplencia(e.target.value)}
+                style={{ width: 110 }}
+              />
+              <span style={{ fontSize: 14, color: 'var(--t2)' }}>%</span>
+            </div>
+          </div>
+
           {file && (
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button className="btn" style={{ flex: 1, justifyContent: 'center' }}
@@ -323,16 +393,76 @@ export default function NewAnalysis() {
         </div>
       )}
 
-      {/* Step 3: Processing */}
-      {step === 3 && (
-        <div style={{ padding: '60px 0', textAlign: 'center' }}>
-          <i className="ti ti-loader" style={{ fontSize: 40, color: 'var(--gold)', display: 'block', marginBottom: 16, animation: 'spin .8s linear infinite' }}></i>
-          <div style={{ fontSize: 16, fontWeight: 500, color: 'var(--t0)', marginBottom: 8 }}>Processando análise...</div>
-          <p style={{ fontSize: 14, color: 'var(--t2)' }}>
-            Extraindo dados e calculando indicadores de <strong>{selectedClient?.name}</strong>
-          </p>
-        </div>
-      )}
+      {/* Step 3: Processing — animação de etapas */}
+      {step === 3 && (() => {
+        const STEPS_LOADING = [
+          { icon: 'ti-file-text',   label: 'Lendo o documento' },
+          { icon: 'ti-search',      label: 'Identificando campos financeiros' },
+          { icon: 'ti-calculator',  label: 'Calculando indicadores' },
+          { icon: 'ti-chart-dots',  label: 'Gerando análise financeira' },
+        ];
+        return (
+          <div style={{ paddingTop: 16 }}>
+            <div style={{ textAlign: 'center', marginBottom: 28 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t0)', marginBottom: 4 }}>
+                Processando análise de <strong>{selectedClient?.name}</strong>
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--t2)' }}>Isso pode levar até 30 segundos — não feche esta aba</div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
+              {STEPS_LOADING.map((s, i) => {
+                const done   = loadingStep > i;
+                const active = loadingStep === i;
+                return (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: 14,
+                    padding: '12px 16px', borderRadius: 10,
+                    background: done ? 'var(--bg1)' : active ? 'var(--bg1)' : 'var(--bg2)',
+                    border: `1px solid ${done ? 'var(--bd)' : active ? 'var(--blue)' : 'var(--bd)'}`,
+                    opacity: loadingStep < i ? 0.35 : 1,
+                    transition: 'opacity .5s, border-color .3s',
+                  }}>
+                    <div style={{
+                      width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: done ? 'var(--green-dim, #d1fae5)' : active ? 'var(--blue-dim, #dbeafe)' : 'var(--bg0)',
+                      border: `1.5px solid ${done ? 'var(--green-t, #16a34a)' : active ? 'var(--blue)' : 'var(--bd)'}`,
+                      transition: 'background .3s, border-color .3s',
+                    }}>
+                      {done
+                        ? <i className="ti ti-check" style={{ fontSize: 15, color: 'var(--green-t, #16a34a)' }} />
+                        : <i className={`ti ${s.icon}`} style={{ fontSize: 15, color: active ? 'var(--blue)' : 'var(--t3)' }} />
+                      }
+                    </div>
+                    <span style={{
+                      fontSize: 14, flex: 1,
+                      fontWeight: done || active ? 500 : 400,
+                      color: done || active ? 'var(--t0)' : 'var(--t2)',
+                      transition: 'color .3s',
+                    }}>{s.label}</span>
+                    {active && <i className="ti ti-loader" style={{ fontSize: 16, color: 'var(--blue)', animation: 'spin .8s linear infinite', flexShrink: 0 }} />}
+                    {done  && <i className="ti ti-circle-check" style={{ fontSize: 16, color: 'var(--green-t, #16a34a)', flexShrink: 0 }} />}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Barra de progresso estimada */}
+            <div style={{ background: 'var(--bg2)', borderRadius: 999, height: 6, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 999,
+                background: 'linear-gradient(90deg, var(--blue) 0%, var(--gold) 100%)',
+                width: `${loadingPct}%`, transition: 'width 1.8s ease',
+              }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--t3)' }}>Extraindo e calculando…</span>
+              <span style={{ fontSize: 11, color: 'var(--t3)', fontVariantNumeric: 'tabular-nums' }}>{loadingPct}%</span>
+            </div>
+          </div>
+        );
+      })()}
 
       {clientModal && (
         <ClientFormModal client={null} onClose={() => setClientModal(false)} onSaved={onClientCreated} />

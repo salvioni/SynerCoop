@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { db } from '../lib/db.js';
 import { authRequired } from '../middleware/auth.js';
-import { badRequest } from '../lib/validate.js';
+import { badRequest, trim } from '../lib/validate.js';
 import { audit, ACTIONS } from '../lib/audit.js';
 import { generateReport } from '../lib/report.js';
 import { generateAnalysisNarrative } from '../lib/narrative.js';
 import { buildAnalysisExcel } from '../lib/excelExport.js';
+import { calculateIndicators } from '../lib/calculator.js';
 import { periodSlug } from '../lib/period.js';
 
 const router = Router();
@@ -47,6 +48,79 @@ router.get('/:id', async (req, res, next) => {
 
     if (!analysis || analysis.tenant_id !== req.user.tenant_id) throw badRequest('Análise não encontrada.');
     res.json({ analysis: _parseAnalysis(analysis) });
+  } catch (e) { next(e); }
+});
+
+// PATCH /analyses/:id/data — edita os dados financeiros de uma análise editável.
+// Permite corrigir bp/dsp manualmente após a extração sem precisar resubmeter o arquivo.
+// Recalcula os indicadores automaticamente e limpa a narrativa para que seja
+// regenerada na próxima visualização com os dados atualizados.
+router.patch('/:id/data', async (req, res, next) => {
+  try {
+    const analysis = await db.prepare(`
+      SELECT a.id, a.status, a.year, a.period_label, a.client_id,
+             c.tenant_id, c.name AS client_name, c.type AS company_type
+      FROM analyses a JOIN clients c ON c.id = a.client_id WHERE a.id = ?
+    `).get(req.params.id);
+
+    if (!analysis || analysis.tenant_id !== req.user.tenant_id) throw badRequest('Análise não encontrada.');
+    if (analysis.status === 'signed') {
+      throw badRequest('Análise assinada não pode ser editada. Revogue a assinatura antes.');
+    }
+
+    // Campos financeiros (bp e dsp são obrigatórios para recalcular)
+    let bpData, dspData;
+    try {
+      bpData  = req.body?.bp  ? (typeof req.body.bp  === 'string' ? JSON.parse(req.body.bp)  : req.body.bp)  : undefined;
+      dspData = req.body?.dsp ? (typeof req.body.dsp === 'string' ? JSON.parse(req.body.dsp) : req.body.dsp) : undefined;
+    } catch {
+      throw badRequest('Dados bp/dsp inválidos (JSON malformado).');
+    }
+
+    if (!bpData && !dspData && req.body?.year === undefined && req.body?.period_label === undefined) {
+      throw badRequest('Informe ao menos um campo para atualizar (bp, dsp, year ou period_label).');
+    }
+
+    // Lê os valores atuais para campos não enviados
+    const current = await db.prepare('SELECT bp, dsp, year, period_label FROM analyses WHERE id = ?').get(analysis.id);
+    const newBp   = bpData  ?? JSON.parse(current.bp  || 'null');
+    const newDsp  = dspData ?? JSON.parse(current.dsp || 'null');
+    const newYear = req.body?.year !== undefined ? parseInt(req.body.year) : current.year;
+    const newPeriodLabel = req.body?.period_label !== undefined
+      ? (trim(req.body.period_label) || null)
+      : current.period_label;
+
+    if (!newYear || isNaN(newYear)) throw badRequest('Ano inválido.', { year: 'Informe um ano válido.' });
+
+    // Bloqueia duplicidade de período (exceto o próprio registro sendo editado)
+    if (newYear !== current.year || newPeriodLabel !== current.period_label) {
+      const dup = await db.prepare(
+        'SELECT id FROM analyses WHERE client_id = ? AND year = ? AND (period_label = ? OR (period_label IS NULL AND ? IS NULL)) AND id != ?'
+      ).get(analysis.client_id, newYear, newPeriodLabel, newPeriodLabel, analysis.id);
+      if (dup) throw badRequest(`Já existe uma análise para ${newPeriodLabel || `o ano ${newYear}`} deste cliente.`);
+    }
+
+    // Recalcula indicadores com os dados novos
+    const newIndicators = calculateIndicators({ bp: newBp, dsp: newDsp });
+
+    // Limpa a narrativa para forçar regeneração com os dados corretos
+    await db.prepare(`
+      UPDATE analyses
+      SET bp = ?, dsp = ?, indicators = ?, year = ?, period_label = ?,
+          narrative = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      JSON.stringify(newBp), JSON.stringify(newDsp), JSON.stringify(newIndicators),
+      newYear, newPeriodLabel, analysis.id
+    );
+
+    await audit(req, ACTIONS.ANALYSIS_UPDATED, {
+      targetType: 'analysis', targetId: analysis.id,
+      targetLabel: `${analysis.client_name} ${newYear}`,
+    });
+
+    const updated = await db.prepare('SELECT * FROM analyses WHERE id = ?').get(analysis.id);
+    res.json({ analysis: _parseAnalysis(updated) });
   } catch (e) { next(e); }
 });
 

@@ -64,30 +64,52 @@ const upload = multer({
 const router = Router();
 router.use(authRequired);
 
-// GET /clients
+// GET /clients — lista clientes com paginação
+// Aceita: ?search=, ?active=, ?page=, ?limit=
+// Retorna: { clients, total, page, totalPages }
 router.get('/', async (req, res, next) => {
   try {
     const { search, active } = req.query;
-    let sql = `
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const offset = (page - 1) * limit;
+
+    // Construção dinâmica de WHERE para reaproveitá-la na query de total
+    let where = 'WHERE c.tenant_id = ?';
+    const baseParams = [req.user.tenant_id];
+
+    if (active !== undefined) {
+      where += ' AND c.active = ?';
+      baseParams.push(active === '1' || active === 'true' ? 1 : 0);
+    }
+    if (search) {
+      where += ' AND (c.name LIKE ? OR c.cnpj LIKE ?)';
+      baseParams.push(`%${search}%`, `%${search}%`);
+    }
+
+    const countSql = `SELECT COUNT(*) AS total FROM clients c ${where}`;
+    const dataSql  = `
       SELECT c.*,
         COUNT(a.id) AS analysis_count,
         MAX(a.year) AS last_analysis_year
       FROM clients c
       LEFT JOIN analyses a ON a.client_id = c.id
-      WHERE c.tenant_id = ?
+      ${where}
+      GROUP BY c.id ORDER BY c.name
+      LIMIT ? OFFSET ?
     `;
-    const params = [req.user.tenant_id];
-    if (active !== undefined) {
-      sql += ` AND c.active = ?`;
-      params.push(active === '1' || active === 'true' ? 1 : 0);
-    }
-    if (search) {
-      sql += ` AND (c.name LIKE ? OR c.cnpj LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`);
-    }
-    sql += ` GROUP BY c.id ORDER BY c.name`;
-    const rows = await db.prepare(sql).all(...params);
-    res.json({ clients: rows });
+
+    const [{ total }, rows] = await Promise.all([
+      db.prepare(countSql).get(...baseParams),
+      db.prepare(dataSql).all(...baseParams, limit, offset),
+    ]);
+
+    res.json({
+      clients:    rows,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (e) { next(e); }
 });
 

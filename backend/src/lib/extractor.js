@@ -5,90 +5,96 @@ import pdfParse from 'pdf-parse';
 import { generateText, parseJsonFromLLM } from './llm.js';
 import { detectPeriodFromFilename, mergePeriod } from './period.js';
 
+// REGRA CRÍTICA DO PROMPT: o JSON de exemplo usa null em todos os campos
+// financeiros — não 0. Se o exemplo mostrasse 0, o LLM ancoraria nele e
+// retornaria zeros mesmo para campos não encontrados, quebrando a distinção
+// null ("não encontrei") vs 0 ("o documento informa que é zero") que toda a
+// pipeline de cálculo e narrativa depende para não inventar indicadores falsos.
 const EXTRACTION_PROMPT = `Você é um especialista em contabilidade de cooperativas brasileiras.
 
 Analise o documento financeiro fornecido e extraia os dados do Balanço Patrimonial (BP) e do Demonstrativo de Sobras e Perdas (DSP).
 
-Retorne SOMENTE um JSON válido com esta estrutura exata (sem texto antes ou depois):
+REGRAS IMPORTANTES (leia antes de ver a estrutura):
+- Todos os valores devem ser números puros (sem R$, sem pontos de milhar, sem vírgulas)
+- Valores de custo/despesa devem ser NEGATIVOS (ex: custos_vendas: -500000, devolucoes: -1000)
+  Isso inclui: custos_vendas, devolucoes, impostos_venda, todas as despesas_*, depreciacao, ir_csll, despesas_financeiras
+- Receitas e ativos são POSITIVOS
+- Se não encontrar um campo no documento, retorne null — NUNCA invente ou estime um valor
+  null = "não encontrei essa informação no documento"
+  0   = "o documento informa que o valor real é zero" (use só quando o documento explicitamente mostra zero)
+  Tratar os dois como a mesma coisa cria viés grave na análise (ex: parecer que não há
+  dívida quando na verdade o dado simplesmente não estava no documento)
+- Cooperativas usam "Sobras/Perdas" em vez de "Lucro/Prejuízo"
+- EBITDA = Resultado Bruto + Despesas Operacionais (sem depreciação e sem resultado financeiro)
+- "confidence": sua confiança geral na extração (0.0 a 1.0)
+- "period_label": se o cabeçalho indicar período mais específico que o ano (ex: "Julho/2025",
+  "1º Trimestre de 2025"), preencha por extenso. Se houver colunas de comparação com anos
+  anteriores, use o exercício PRINCIPAL, não o de comparação. Se só o ano constar, deixe null.
+
+Retorne SOMENTE um JSON válido com esta estrutura (sem texto antes ou depois).
+Todos os campos financeiros aparecem como null no exemplo — substitua pelo valor real
+encontrado no documento, ou mantenha null se não encontrar:
 
 {
   "year": 2024,
   "period_label": null,
   "bp": {
-    "ativo_circulante": 0,
-    "caixa": 0,
-    "contas_receber_cp": 0,
-    "adiantamentos": 0,
-    "estoques": 0,
-    "outros_creditos_cp": 0,
-    "ativo_nao_circulante": 0,
-    "contas_receber_lp": 0,
-    "outros_creditos_lp": 0,
-    "ativo_permanente": 0,
-    "investimentos": 0,
-    "imobilizado": 0,
-    "total_ativo": 0,
-    "passivo_circulante": 0,
-    "contas_pagar_cp": 0,
-    "emprestimos_cp": 0,
-    "obrigacoes_trabalhistas": 0,
-    "obrigacoes_tributarias_cp": 0,
-    "outros_debitos_cp": 0,
-    "passivo_nao_circulante": 0,
-    "contas_pagar_lp": 0,
-    "emprestimos_lp": 0,
-    "obrigacoes_tributarias_lp": 0,
-    "outros_debitos_lp": 0,
-    "patrimonio_liquido": 0,
-    "capital_social": 0,
-    "capital_integralizar": 0,
-    "sobras_exercicio": 0,
-    "sobras_acumuladas": 0,
-    "total_passivo_pl": 0
+    "ativo_circulante": null,
+    "caixa": null,
+    "contas_receber_cp": null,
+    "adiantamentos": null,
+    "estoques": null,
+    "outros_creditos_cp": null,
+    "ativo_nao_circulante": null,
+    "contas_receber_lp": null,
+    "outros_creditos_lp": null,
+    "ativo_permanente": null,
+    "investimentos": null,
+    "imobilizado": null,
+    "total_ativo": null,
+    "passivo_circulante": null,
+    "contas_pagar_cp": null,
+    "emprestimos_cp": null,
+    "obrigacoes_trabalhistas": null,
+    "obrigacoes_tributarias_cp": null,
+    "outros_debitos_cp": null,
+    "passivo_nao_circulante": null,
+    "contas_pagar_lp": null,
+    "emprestimos_lp": null,
+    "obrigacoes_tributarias_lp": null,
+    "outros_debitos_lp": null,
+    "patrimonio_liquido": null,
+    "capital_social": null,
+    "capital_integralizar": null,
+    "sobras_exercicio": null,
+    "sobras_acumuladas": null,
+    "total_passivo_pl": null
   },
   "dsp": {
-    "receita_bruta": 0,
-    "devolucoes": 0,
-    "impostos_venda": 0,
-    "receita_liquida": 0,
-    "custos_vendas": 0,
-    "resultado_bruto": 0,
-    "despesas_comerciais": 0,
-    "despesas_pessoal": 0,
-    "despesas_administrativas": 0,
-    "despesas_tributarias": 0,
-    "outros_receitas_operacionais": 0,
-    "outros_despesas_operacionais": 0,
-    "despesas_operacionais": 0,
-    "ebitda": 0,
-    "depreciacao": 0,
-    "receitas_financeiras": 0,
-    "despesas_financeiras": 0,
-    "resultado_antes_ir": 0,
-    "ir_csll": 0,
-    "sobras_perdas": 0
+    "receita_bruta": null,
+    "devolucoes": null,
+    "impostos_venda": null,
+    "receita_liquida": null,
+    "custos_vendas": null,
+    "resultado_bruto": null,
+    "despesas_comerciais": null,
+    "despesas_pessoal": null,
+    "despesas_administrativas": null,
+    "despesas_tributarias": null,
+    "outros_receitas_operacionais": null,
+    "outros_despesas_operacionais": null,
+    "despesas_operacionais": null,
+    "ebitda": null,
+    "depreciacao": null,
+    "receitas_financeiras": null,
+    "despesas_financeiras": null,
+    "resultado_antes_ir": null,
+    "ir_csll": null,
+    "sobras_perdas": null
   },
   "confidence": 0.9,
   "notes": "observações sobre a extração"
-}
-
-Regras importantes:
-- Todos os valores devem ser números (sem R$, sem pontos de milhar, sem vírgulas)
-- Valores de custo/despesa devem ser NEGATIVOS (ex: custos_vendas: -500000)
-- Se não encontrar um campo no documento, retorne null — NUNCA 0. O 0 acima em cada
-  campo do exemplo é só um placeholder de tipo. 0 significa "o documento informa que
-  o valor real é zero"; null significa "não encontrei essa informação no documento".
-  Tratar os dois como a mesma coisa cria viés na análise (ex: parecer que não há
-  dívida quando na verdade o dado só não estava no documento)
-- O campo "confidence" deve refletir sua confiança na extração (0 a 1)
-- Cooperativas usam "Sobras/Perdas" em vez de "Lucro/Prejuízo"
-- EBITDA = Resultado Bruto + Despesas Operacionais (sem depreciação/financeiro)
-- "period_label": se o cabeçalho/título do documento indicar um período mais
-  específico que o ano (ex: "Balanço Patrimonial - Julho/2025", "1º Trimestre de
-  2025"), preencha por extenso (ex: "Julho de 2025", "1º Trimestre de 2025"). O
-  documento pode ter colunas de anos anteriores só para efeito de comparação —
-  use o período do exercício PRINCIPAL sendo analisado, não o de comparação. Se
-  só um ano constar (sem mês/trimestre/bimestre/semestre), deixe null`;
+}`;
 
 export async function extractFromFile(buffer, filename, companyName) {
   const lower = filename.toLowerCase();
@@ -299,9 +305,20 @@ async function extractFromPdf(buffer, filename, companyName) {
     throw new Error(`Não foi possível ler o PDF: ${e.message}`);
   }
 
+  // PDF escaneado (imagem): pdf-parse extrai texto vazio de páginas que são
+  // imagens. Falhar aqui com mensagem clara é melhor do que mandar um documento
+  // em branco pra IA e o usuário receber uma análise sem nenhum dado, sem saber
+  // o motivo. Limite conservador de 300 chars — qualquer BP real tem muito mais.
+  if (fullText.trim().length < 300) {
+    throw new Error(
+      'O PDF não contém texto legível — pode ser um documento escaneado (imagem). ' +
+      'Use um PDF gerado diretamente pelo sistema contábil ou exporte os dados para Excel.'
+    );
+  }
+
   // Tentar extrair só a seção financeira pra reduzir tokens
   const financialSection = extractFinancialSection(fullText);
-  const textToSend = financialSection || (fullText.length > 80000 ? fullText.slice(-80000) : fullText);
+  const textToSend = financialSection || (fullText.length > 80000 ? fullText.slice(0, 80000) : fullText);
 
   console.log(`[extract-pdf] Total: ${fullText.length} chars, Enviando: ${textToSend.length} chars, Seção financeira: ${financialSection ? 'sim' : 'não'}`);
 
@@ -309,14 +326,17 @@ async function extractFromPdf(buffer, filename, companyName) {
 }
 
 async function extractWithAI(textContent, companyName, sourceType, filename) {
-  const prompt = `Empresa: ${companyName}
+  // Instruções vêm antes do documento — para documentos grandes (até 80k chars)
+  // as regras ficam no início do contexto e têm mais peso na geração do que
+  // se estivessem no final, enterradas após o conteúdo financeiro.
+  const prompt = `${EXTRACTION_PROMPT}
+
+Empresa: ${companyName}
 Tipo de arquivo: ${sourceType}
 Nome do arquivo: ${filename || '(desconhecido)'}
 
 Documento financeiro:
-${textContent}
-
-${EXTRACTION_PROMPT}`;
+${textContent}`;
 
   let raw = await generateText(prompt, { maxTokens: 16000 });
 

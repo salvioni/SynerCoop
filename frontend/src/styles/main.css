@@ -134,6 +134,7 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .page-head { padding: 28px 32px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-shrink: 0; background: var(--bg0) }
 .page-head-l p { font-size: 14px; color: var(--t2); margin-bottom: 2px }
 .page-head-l h1 { font-family: var(--font-serif); font-size: 36px; font-weight: 400; color: var(--t0); letter-spacing: -0.01em; line-height: 1.15 }
+.page-h1 { font-family: var(--font-serif); font-size: 36px; font-weight: 400; color: var(--t0); letter-spacing: -0.01em; line-height: 1.15; margin-top: 0 }
 .page-body { flex: 1; overflow-y: auto; padding: 52px 32px 40px }
 
 /* ── Nav Tabs (inside page) ── */
@@ -382,6 +383,9 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .report-textarea { width: 100%; background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--r); color: var(--t0); padding: 12px 14px; font-size: 13px; line-height: 1.7; resize: vertical; font-family: inherit; outline: none; min-height: 90px }
 .report-textarea:focus { border-color: var(--blue) }
 
+/* ── Account page ── */
+.acct-office-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px }
+
 /* ── Theme picker (Account page) ── */
 .theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px }
 .theme-card { border: 2px solid var(--bd); border-radius: var(--rl); overflow: hidden; cursor: pointer; transition: border-color .15s }
@@ -491,7 +495,7 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .landing { min-height: 100vh; background: var(--bg0); color: var(--t0) }
 .ld-container { width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 24px }
 .ld-header { border-bottom: 1px solid color-mix(in oklch, var(--bd) 60%, transparent); background: color-mix(in oklch, var(--bg0) 80%, transparent); position: sticky; top: 0; z-index: 10; backdrop-filter: blur(12px) }
-.ld-header-inner { display: flex; align-items: center; justify-content: space-between; padding: 16px 0 }
+.ld-header-inner { display: flex; align-items: center; justify-content: space-between; padding-top: 16px; padding-bottom: 16px }
 .ld-logo { display: flex; align-items: center; gap: 10px; text-decoration: none }
 .ld-logo-badge { width: 32px; height: 32px; border-radius: 6px; background: var(--blue); color: var(--primary-fg); display: flex; align-items: center; justify-content: center; font-family: var(--font-serif); font-size: 14px }
 .ld-logo-name { font-family: var(--font-serif); font-size: 20px; color: var(--t0) }
@@ -529,7 +533,7 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .ld-plan-feats { list-style: none; margin-top: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; flex: 1 }
 .ld-plan-feats li { display: flex; align-items: flex-start; gap: 8px }
 .ld-footer { border-top: 1px solid var(--bd) }
-.ld-footer-inner { padding: 40px 0; display: flex; align-items: center; justify-content: space-between }
+.ld-footer-inner { padding-top: 40px; padding-bottom: 40px; display: flex; align-items: center; justify-content: space-between }
 
 @media (max-width: 768px) {
   .ld-nav { display: none }
@@ -586,8 +590,9 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
   .layout { flex-direction: column }
   .main { padding-bottom: 68px }
   .page-head { padding: 20px 16px }
-  .page-body { padding: 0 16px 80px !important }
+  .page-body { padding: 20px 16px 80px !important }
   .page-head-l h1 { font-size: 28px }
+  .page-h1 { font-size: 28px }
   .dash-grid { grid-template-columns: repeat(2, 1fr) }
   .dash-cols { grid-template-columns: 1fr }
   .cl-grid { grid-template-columns: 1fr }
@@ -618,8 +623,11 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 
 /* ── Small phone breakpoint ── */
 @media (max-width: 480px) {
+  .ld-container { padding-left: 16px; padding-right: 16px }
+  .acct-office-grid { grid-template-columns: 1fr }
   .page-head { flex-direction: column; align-items: flex-start; gap: 12px }
   .page-head-l h1 { font-size: 24px }
+  .page-h1 { font-size: 24px }
   .dash-grid { grid-template-columns: 1fr }
   .dash-card-val { font-size: 28px }
   .rv-grid { grid-template-columns: 1fr }

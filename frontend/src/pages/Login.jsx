@@ -29,6 +29,7 @@ export default function Login() {
   const [regForm, setRegForm] = useState({ name: '', email: '', company: '', companyType: '', sector: '', password: '' });
   const [regErrs, setRegErrs] = useState({});
   const [showRegPass, setShowRegPass] = useState(false);
+  const [terms, setTerms] = useState(false);
 
   function updReg(k, v) { setRegForm(p => ({ ...p, [k]: v })); setRegErrs(p => { const c = { ...p }; delete c[k]; return c; }); setErr(''); }
 
@@ -44,6 +45,7 @@ export default function Login() {
     if (!regForm.sector) fe.sector = 'Selecione a área.';
     if (!regForm.password) fe.password = 'Crie uma senha.';
     else if (regForm.password.length < MIN_PASSWORD_LENGTH) fe.password = `Mínimo ${MIN_PASSWORD_LENGTH} caracteres.`;
+    if (!terms) fe.terms = 'Aceite os Termos de Uso para continuar.';
     if (Object.keys(fe).length) { setRegErrs(fe); return; }
 
     setBusy(true);
@@ -51,7 +53,8 @@ export default function Login() {
     try {
       const r = await register({
         name: regForm.name.trim(), email: em.toLowerCase(), company: regForm.company.trim(),
-        companyType: regForm.companyType, sector: regForm.sector, password: regForm.password, role: 'manager'
+        companyType: regForm.companyType, sector: regForm.sector, password: regForm.password,
+        role: 'manager', terms_accepted: true,
       }, () => setConnecting(true));
       navigate('/verify', { state: { userId: r.userId, email: r.email, devCode: r.devCode } });
     } catch (e) {
@@ -67,6 +70,7 @@ export default function Login() {
   const [socialType, setSocialType] = useState('');
   const [socialSector, setSocialSector] = useState('');
   const [socialErrs, setSocialErrs] = useState({});
+  const [termsSocial, setTermsSocial] = useState(false);
 
   function clr(k) { setErrs(p => { const c = { ...p }; delete c[k]; return c; }); setErr(''); }
 
@@ -113,14 +117,15 @@ export default function Login() {
     if (!c) fe.company = 'Informe o nome do escritório.';
     if (!socialType) fe.companyType = 'Selecione o tipo.';
     if (!socialSector) fe.sector = 'Selecione a área.';
+    if (!termsSocial) fe.terms = 'Aceite os Termos de Uso para continuar.';
     if (Object.keys(fe).length) { setSocialErrs(fe); return; }
 
     setBusy(true);
     setSocialErrs({});
     try {
       const user = socialPending.provider === 'google'
-        ? await completeGoogleSignup(socialPending.token, c, socialType, socialSector)
-        : await completeFacebookSignup(socialPending.token, c, socialType, socialSector);
+        ? await completeGoogleSignup(socialPending.token, c, socialType, socialSector, true)
+        : await completeFacebookSignup(socialPending.token, c, socialType, socialSector, true);
       goAfterAuth(user);
     } catch (e) {
       if (e instanceof ApiError && e.fields) setSocialErrs(e.fields);
@@ -156,6 +161,21 @@ export default function Login() {
     if (Object.keys(fe).length) { setErrs(fe); return; }
     await doLogin(em, pass);
   }
+
+  const termsLink = (
+    <span>
+      Li e aceito os{' '}
+      <a href="/termos" target="_blank" rel="noopener noreferrer"
+        style={{ color: 'var(--blue-text)', fontWeight: 500 }}>
+        Termos de Uso
+      </a>{' '}
+      e a{' '}
+      <a href="/privacidade" target="_blank" rel="noopener noreferrer"
+        style={{ color: 'var(--blue-text)', fontWeight: 500 }}>
+        Política de Privacidade
+      </a>
+    </span>
+  );
 
   return (
     <div className="auth-split">
@@ -269,6 +289,16 @@ export default function Login() {
                 {regErrs.password && <div className="inp-hint">{regErrs.password}</div>}
               </div>
 
+              {/* Aceite dos Termos — obrigatório (LGPD Art. 7) */}
+              <div>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+                  <input type="checkbox" checked={terms} onChange={e => { setTerms(e.target.checked); setRegErrs(p => ({ ...p, terms: '' })); }}
+                    style={{ marginTop: 2, flexShrink: 0, accentColor: 'var(--blue-text)', width: 16, height: 16 }} />
+                  <span style={{ fontSize: 13, color: 'var(--t1)', lineHeight: 1.4 }}>{termsLink}</span>
+                </label>
+                {regErrs.terms && <div className="inp-hint" style={{ marginTop: 4 }}>{regErrs.terms}</div>}
+              </div>
+
               <button className="btn btn-p" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center', padding: '10px 18px' }}>
                 {connecting ? 'Conectando ao servidor… pode levar até 1 min' : busy ? 'Criando…' : 'Criar conta'}
               </button>
@@ -315,11 +345,21 @@ export default function Login() {
                 </div>
               </div>
 
+              {/* Aceite dos Termos — obrigatório (LGPD Art. 7) */}
+              <div>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+                  <input type="checkbox" checked={termsSocial} onChange={e => { setTermsSocial(e.target.checked); setSocialErrs(p => ({ ...p, terms: '' })); }}
+                    style={{ marginTop: 2, flexShrink: 0, accentColor: 'var(--blue-text)', width: 16, height: 16 }} />
+                  <span style={{ fontSize: 13, color: 'var(--t1)', lineHeight: 1.4 }}>{termsLink}</span>
+                </label>
+                {socialErrs.terms && <div className="inp-hint" style={{ marginTop: 4 }}>{socialErrs.terms}</div>}
+              </div>
+
               <button className="btn btn-p" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center', padding: '10px 18px' }}>
                 {busy ? 'Criando conta…' : 'Criar conta e entrar'}
               </button>
               <button type="button" className="btn" disabled={busy}
-                onClick={() => { setSocialPending(null); setCompany(''); setSocialType(''); setSocialSector(''); setSocialErrs({}); }}
+                onClick={() => { setSocialPending(null); setCompany(''); setSocialType(''); setSocialSector(''); setSocialErrs({}); setTermsSocial(false); }}
                 style={{ width: '100%', justifyContent: 'center' }}>
                 Cancelar
               </button>
@@ -381,11 +421,11 @@ export default function Login() {
           <p style={{ fontSize: 14, textAlign: 'center', color: 'var(--t2)', marginTop: 32 }}>
             {isRegister ? (
               <>Já tem conta?{' '}
-                <Link to="/login" onClick={() => { setErr(''); setRegErrs({}); }} style={{ color: 'var(--blue-text)', fontWeight: 500 }}>Entrar</Link>
+                <Link to="/login" onClick={() => { setErr(''); setRegErrs({}); setTerms(false); }} style={{ color: 'var(--blue-text)', fontWeight: 500 }}>Entrar</Link>
               </>
             ) : socialPending ? (
               <>Já possui uma conta?{' '}
-                <a onClick={() => { setSocialPending(null); setCompany(''); setSocialType(''); setSocialSector(''); setSocialErrs({}); }}
+                <a onClick={() => { setSocialPending(null); setCompany(''); setSocialType(''); setSocialSector(''); setSocialErrs({}); setTermsSocial(false); }}
                   style={{ color: 'var(--blue-text)', fontWeight: 500, cursor: 'pointer' }}>Entrar</a>
               </>
             ) : (

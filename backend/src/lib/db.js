@@ -80,8 +80,7 @@ if (USE_PG) {
   const path = (await import('node:path')).default;
   const { fileURLToPath } = await import('node:url');
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  // Testes usam um banco em memória, isolado do data.db de desenvolvimento —
-  // sem isso, cada `npm test` gravava tenants/usuários de teste no arquivo real.
+  // Testes usam um banco em memória, isolado do data.db de desenvolvimento.
   const DB_PATH = process.env.NODE_ENV === 'test'
     ? ':memory:'
     : path.resolve(__dirname, '../../data.db');
@@ -220,6 +219,15 @@ export async function initDb() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMP NOT NULL,
+      revoked_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_analyses_client ON analyses(client_id);
     CREATE INDEX IF NOT EXISTS idx_analyses_created_at ON analyses(created_at);
     CREATE INDEX IF NOT EXISTS idx_clients_tenant ON clients(tenant_id);
@@ -229,6 +237,8 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token);
     CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token);
     CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_logs(tenant_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
   `);
 
   // Migrações idempotentes
@@ -252,35 +262,23 @@ export async function initDb() {
     `ALTER TABLE tenants ADD COLUMN type TEXT DEFAULT 'empresa'`,
     `ALTER TABLE tenants ADD COLUMN sector TEXT`,
     `ALTER TABLE tenants ADD COLUMN self_client_id TEXT`,
-    // Marca a conclusão da escolha de plano (trial ou checkout do Stripe),
-    // uma única vez, para sempre — diferente de `plan`, que fica NULL de
-    // novo se a assinatura for cancelada. Sem essa distinção, um tenant
-    // pagante cuja assinatura expira ficaria indistinguível de um cadastro
-    // nunca finalizado (ver POST /auth/register).
     `ALTER TABLE tenants ADD COLUMN onboarded_at TIMESTAMP`,
-    // Logo do escritório/empresa (base64), usado na marca branca dos relatórios.
     `ALTER TABLE tenants ADD COLUMN logo TEXT`,
-    // Dados de contato do escritório exibidos/editáveis em Ajustes > Escritório.
     `ALTER TABLE tenants ADD COLUMN cnpj TEXT`,
     `ALTER TABLE tenants ADD COLUMN phone TEXT`,
     `ALTER TABLE tenants ADD COLUMN billing_email TEXT`,
-    // Assinatura da análise — quando preenchido, trava edição da narrativa e
-    // estampa "assinado por X em Y" no relatório baixável (ver lib/report.js).
     `ALTER TABLE analyses ADD COLUMN signed_at TIMESTAMP`,
     `ALTER TABLE analyses ADD COLUMN signed_by TEXT`,
-    // 'done' era o único valor usado antes de existir o estado 'signed' —
-    // migra os registros antigos para o novo vocabulário (idempotente: só
-    // afeta linhas que ainda não foram assinadas).
     `UPDATE analyses SET status = 'editable' WHERE status = 'done'`,
-    // Detalhe granular (contas/sub-itens do questionário Balanço Perguntado),
-    // capturado só quando o arquivo enviado já está nesse formato padrão —
-    // usado pra reproduzir as abas de detalhe no Excel exportado (ver
-    // lib/excelExport.js). NULL quando a extração veio de PDF/IA.
     `ALTER TABLE analyses ADD COLUMN detail TEXT`,
-    // Rótulo do período quando mais específico que o ano (ex: "Julho de 2025",
-    // "1º Trimestre de 2025"), detectado a partir do nome do arquivo enviado ou
-    // do próprio documento (ver lib/period.js) — NULL quando só o ano é conhecido.
     `ALTER TABLE analyses ADD COLUMN period_label TEXT`,
+    // Novas migrações: revogação de JWT, consentimento LGPD e senha local para OAuth
+    `ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN consented_at TIMESTAMP`,
+    `ALTER TABLE users ADD COLUMN has_password INTEGER DEFAULT 0`,
+    // Torna actor_id nullable para anonimização completa (LGPD)
+    // — em Postgres funciona; em SQLite falha silenciosamente (driver não suporta)
+    `ALTER TABLE audit_logs ALTER COLUMN actor_id DROP NOT NULL`,
   ]) {
     try { await db.exec(sql); } catch { /* já aplicado ou não suportado pelo driver */ }
   }
@@ -289,6 +287,7 @@ export async function initDb() {
   await db.exec(`DELETE FROM email_verifications WHERE expires_at < CURRENT_TIMESTAMP`);
   await db.exec(`DELETE FROM password_resets WHERE expires_at < CURRENT_TIMESTAMP`);
   await db.exec(`DELETE FROM invites WHERE expires_at < CURRENT_TIMESTAMP AND used_at IS NULL`);
+  await db.exec(`DELETE FROM refresh_tokens WHERE expires_at < CURRENT_TIMESTAMP`);
 
   (await import('./logger.js')).default.info({ driver: driverName }, 'DB schema OK');
 }

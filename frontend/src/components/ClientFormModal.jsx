@@ -33,10 +33,32 @@ export default function ClientFormModal({ client, onClose, onSaved }) {
     setForm(p => ({ ...p, logo_color: color, logo: null }));
   }
 
+  function maskCnpj(v) {
+    const d = v.replace(/\D/g, '').slice(0, 14);
+    if (d.length <= 2) return d;
+    if (d.length <= 5) return `${d.slice(0,2)}.${d.slice(2)}`;
+    if (d.length <= 8) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5)}`;
+    if (d.length <= 12) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8)}`;
+    return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
+  }
+
+  function maskPhone(v) {
+    const d = v.replace(/\D/g, '').slice(0, 11);
+    if (d.length <= 2) return d.length ? `(${d}` : '';
+    if (d.length <= 6) return `(${d.slice(0,2)}) ${d.slice(2)}`;
+    if (d.length <= 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+    return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  }
+
   function upd(k, v) { setForm(p => ({ ...p, [k]: v })); setErrs(p => ({ ...p, [k]: '' })); setErr(''); }
 
   async function save() {
     if (!form.name.trim()) { setErrs({ name: 'Informe o nome.' }); return; }
+    const cnpjDigits = form.cnpj.replace(/\D/g, '');
+    const phoneDigits = form.contact_phone.replace(/\D/g, '');
+    if (form.cnpj && cnpjDigits.length !== 14) { setErrs({ cnpj: 'CNPJ incompleto.' }); return; }
+    if (form.contact_phone && phoneDigits.length < 10) { setErrs({ contact_phone: 'Telefone incompleto — informe DDD + número.' }); return; }
+    if (form.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contact_email.trim())) { setErrs({ contact_email: 'E-mail inválido.' }); return; }
     setBusy(true); setErr('');
     try {
       const r = client ? await api.put(`/clients/${client.id}`, form) : await api.post('/clients', form);
@@ -100,15 +122,18 @@ export default function ClientFormModal({ client, onClose, onSaved }) {
             </div>
             <div>
               <label className="inp-label">CNPJ</label>
-              <input className="inp" placeholder="00.000.000/0001-00" value={form.cnpj} onChange={e => upd('cnpj', e.target.value)} />
+              <input className={`inp${errs.cnpj ? ' inp-err' : ''}`} placeholder="00.000.000/0001-00" value={form.cnpj} onChange={e => upd('cnpj', maskCnpj(e.target.value))} inputMode="numeric" />
+              {errs.cnpj && <div className="inp-hint">{errs.cnpj}</div>}
             </div>
             <div>
               <label className="inp-label">E-mail de contato</label>
-              <input className="inp" type="email" placeholder="contato@empresa.com" value={form.contact_email} onChange={e => upd('contact_email', e.target.value)} />
+              <input className={`inp${errs.contact_email ? ' inp-err' : ''}`} type="email" placeholder="contato@empresa.com" value={form.contact_email} onChange={e => upd('contact_email', e.target.value)} />
+              {errs.contact_email && <div className="inp-hint">{errs.contact_email}</div>}
             </div>
             <div>
               <label className="inp-label">Telefone</label>
-              <input className="inp" placeholder="(00) 00000-0000" value={form.contact_phone} onChange={e => upd('contact_phone', e.target.value)} />
+              <input className={`inp${errs.contact_phone ? ' inp-err' : ''}`} placeholder="(00) 00000-0000" value={form.contact_phone} onChange={e => upd('contact_phone', maskPhone(e.target.value))} inputMode="numeric" />
+              {errs.contact_phone && <div className="inp-hint">{errs.contact_phone}</div>}
             </div>
           </div>
           <div className="inp-wrap" style={{ marginBottom: 0 }}>

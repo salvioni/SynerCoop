@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { api, setToken, ApiError } from './api.js';
+import { api, setToken, setRefreshToken, getRefreshToken, ApiError } from './api.js';
 
 const AuthCtx = createContext(null);
 
@@ -13,13 +13,26 @@ export function AuthProvider({ children }) {
     if (!token) { setLoading(false); return; }
     api.get('/auth/me')
       .then(d => setUser(d.user))
-      .catch(() => { setToken(null); setUser(null); })
+      .catch(() => { setToken(null); setRefreshToken(null); setUser(null); })
       .finally(() => setLoading(false));
+  }, []);
+
+  // Quando o interceptor de 401 esgota o refresh, derruba a sessão local
+  // sem precisar que cada componente trate isso individualmente.
+  useEffect(() => {
+    function onSessionExpired() {
+      setToken(null);
+      setRefreshToken(null);
+      setUser(null);
+    }
+    window.addEventListener('auth:session-expired', onSessionExpired);
+    return () => window.removeEventListener('auth:session-expired', onSessionExpired);
   }, []);
 
   async function login(email, password, onRetry) {
     const d = await api.post('/auth/login', { email, password }, { onRetry });
     setToken(d.token);
+    setRefreshToken(d.refreshToken);
     setUser(d.user);
     return d.user;
   }
@@ -34,15 +47,17 @@ export function AuthProvider({ children }) {
     const d = await api.post('/auth/google', { accessToken });
     if (d.needsSignup) return d;
     setToken(d.token);
+    setRefreshToken(d.refreshToken);
     setUser(d.user);
     return d.user;
   }
 
   // Conclui o cadastro de um usuário novo vindo do login com Google,
   // criando o tenant (com tipo e setor) com o nome informado.
-  async function completeGoogleSignup(accessToken, company, companyType, sector) {
-    const d = await api.post('/auth/google/complete', { accessToken, company, companyType, sector });
+  async function completeGoogleSignup(accessToken, company, companyType, sector, termsAccepted) {
+    const d = await api.post('/auth/google/complete', { accessToken, company, companyType, sector, terms_accepted: termsAccepted });
     setToken(d.token);
+    setRefreshToken(d.refreshToken);
     setUser(d.user);
     return d.user;
   }
@@ -53,15 +68,17 @@ export function AuthProvider({ children }) {
     const d = await api.post('/auth/facebook', { accessToken });
     if (d.needsSignup) return d;
     setToken(d.token);
+    setRefreshToken(d.refreshToken);
     setUser(d.user);
     return d.user;
   }
 
   // Conclui o cadastro de um usuário novo vindo do login com Facebook,
   // criando o tenant (com tipo e setor) com o nome informado.
-  async function completeFacebookSignup(accessToken, company, companyType, sector) {
-    const d = await api.post('/auth/facebook/complete', { accessToken, company, companyType, sector });
+  async function completeFacebookSignup(accessToken, company, companyType, sector, termsAccepted) {
+    const d = await api.post('/auth/facebook/complete', { accessToken, company, companyType, sector, terms_accepted: termsAccepted });
     setToken(d.token);
+    setRefreshToken(d.refreshToken);
     setUser(d.user);
     return d.user;
   }
@@ -69,6 +86,7 @@ export function AuthProvider({ children }) {
   async function verifyEmail(userId, code) {
     const d = await api.post('/auth/verify-email', { userId, code });
     setToken(d.token);
+    setRefreshToken(d.refreshToken);
     setUser(d.user);
     return d.user;
   }
@@ -80,13 +98,18 @@ export function AuthProvider({ children }) {
     } catch { /* ignora */ }
   }
 
-  function logout() {
+  async function logout() {
+    // Invalida o refresh token no servidor (fire-and-forget — não bloqueia o logout local).
+    const refreshToken = getRefreshToken();
+    api.post('/auth/logout', { refreshToken }).catch(() => {});
     setToken(null);
+    setRefreshToken(null);
     setUser(null);
   }
 
-  function acceptInvite(token, userData) {
+  function acceptInvite(token, userData, refreshToken) {
     setToken(token);
+    setRefreshToken(refreshToken ?? null);
     setUser(userData);
   }
 

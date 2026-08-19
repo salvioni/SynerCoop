@@ -14,6 +14,7 @@ export default function AcceptInvite() {
   const [status, setStatus] = useState('loading');
   const [pass, setPass] = useState('');
   const [pass2, setPass2] = useState('');
+  const [terms, setTerms] = useState(false);
   const [errs, setErrs] = useState({});
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,12 +38,13 @@ export default function AcceptInvite() {
     else if (pass.length < MIN_PASSWORD_LENGTH) fe.pass = `Mínimo ${MIN_PASSWORD_LENGTH} caracteres.`;
     if (!pass2) fe.pass2 = 'Confirme a senha.';
     else if (pass !== pass2) fe.pass2 = 'As senhas não coincidem.';
+    if (!terms) fe.terms = 'Aceite os Termos de Uso para continuar.';
     if (Object.keys(fe).length) { setErrs(fe); return; }
     setBusy(true);
     setErr('');
     try {
-      const d = await api.post(`/auth/accept-invite/${token}`, { password: pass });
-      acceptInvite(d.token, d.user);
+      const d = await api.post(`/auth/accept-invite/${token}`, { password: pass, terms_accepted: true });
+      acceptInvite(d.token, d.user, d.refreshToken);
       navigate('/app/clients', { replace: true });
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'Erro inesperado.');
@@ -117,6 +119,28 @@ export default function AcceptInvite() {
               value={pass2} onChange={e => { setPass2(e.target.value); setErrs(p => ({ ...p, pass2: '' })); }} />
             {errs.pass2 && <div className="inp-hint">{errs.pass2}</div>}
           </div>
+
+          {/* Aceite dos Termos — obrigatório (LGPD Art. 7) */}
+          <div className="inp-wrap">
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={terms} onChange={e => { setTerms(e.target.checked); setErrs(p => ({ ...p, terms: '' })); }}
+                style={{ marginTop: 2, flexShrink: 0, accentColor: 'var(--blue-text)', width: 16, height: 16 }} />
+              <span style={{ fontSize: 13, color: 'var(--t1)', lineHeight: 1.4 }}>
+                Li e aceito os{' '}
+                <a href="/termos" target="_blank" rel="noopener noreferrer"
+                  style={{ color: 'var(--blue-text)', fontWeight: 500 }}>
+                  Termos de Uso
+                </a>{' '}
+                e a{' '}
+                <a href="/privacidade" target="_blank" rel="noopener noreferrer"
+                  style={{ color: 'var(--blue-text)', fontWeight: 500 }}>
+                  Política de Privacidade
+                </a>
+              </span>
+            </label>
+            {errs.terms && <div className="inp-hint" style={{ marginTop: 4 }}>{errs.terms}</div>}
+          </div>
+
           <button className="btn btn-p" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center' }}>
             <i className="ti ti-check"></i> {busy ? 'Ativando…' : 'Ativar minha conta'}
           </button>

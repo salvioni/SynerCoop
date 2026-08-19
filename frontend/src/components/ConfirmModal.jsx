@@ -20,7 +20,7 @@ export default function ConfirmModal({ title, message, warning, confirmLabel = '
         </div>
         <div className="modal-foot">
           <button className="btn" onClick={onClose}>Cancelar</button>
-          <button className={`btn ${danger ? 'btn-d' : 'btn-p'}`} onClick={onConfirm}>{confirmLabel}</button>
+          <button className={`btn ${danger ? 'btn-d' : 'btn-p'}`} onClick={() => { onConfirm?.(); onClose?.(); }}>{confirmLabel}</button>
         </div>
       </div>
     </div>

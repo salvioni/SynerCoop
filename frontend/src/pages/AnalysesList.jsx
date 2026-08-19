@@ -18,6 +18,7 @@ export default function AnalysesList() {
   const [statusFilter, setStatusFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [confirm, setConfirm] = useState(null);
+  const [deleteErr, setDeleteErr] = useState('');
 
   useEffect(() => {
     api.get('/analyses?limit=100')
@@ -27,11 +28,10 @@ export default function AnalysesList() {
   }, []);
 
   async function deleteAnalysis(a) {
-    setConfirm(null);
     try {
       await api.del(`/analyses/${a.id}`);
       setAnalyses(prev => prev.filter(x => x.id !== a.id));
-    } catch (e) { alert(e.message); }
+    } catch (e) { setDeleteErr(e.message || 'Erro ao excluir análise.'); }
   }
 
   const years = [...new Set(analyses.map(a => a.year))].sort((a, b) => b - a);
@@ -45,6 +45,7 @@ export default function AnalysesList() {
 
   return (
     <div className="page-body">
+      {deleteErr && <div className="err-banner" style={{ marginBottom: 16 }}>{deleteErr}</div>}
       <PageHeader
         subtitle="Histórico"
         title="Análises"
@@ -82,66 +83,124 @@ export default function AnalysesList() {
         />
       </div>
 
+      <style>{`
+        .al-table-wrap { display: block; }
+        .al-cards-wrap { display: none; }
+        @media (max-width: 1024px) {
+          .al-table-wrap { display: none; }
+          .al-cards-wrap { display: flex; flex-direction: column; gap: 8px; }
+        }
+      `}</style>
+
       {loading ? (
         <div style={{ color: 'var(--t2)', fontSize: 14, padding: '40px 0', textAlign: 'center' }}>Carregando…</div>
       ) : (
-        <div className="adm-table-wrap table-scroll">
-          <table className="adm-table" style={{ minWidth: 600 }}>
-            <thead>
-              <tr>
-                <th>Cliente</th>
-                <th>Exercício</th>
-                <th>Criada por</th>
-                <th>Data</th>
-                {SIGNING_ENABLED && <th>Status</th>}
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(a => (
-                <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/app/analyses/${a.id}`)}>
-                  <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      {a.client_name || 'Cliente'}
-                      {!a.client_active && <span className="pill pill-y">Arquivado</span>}
-                    </span>
-                  </td>
-                  <td>{periodShort(a)}</td>
-                  <td>
-                    {a.user_name ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <UserAvatar user={{ name: a.user_name, avatar: a.user_avatar, avatar_color: a.user_avatar_color }} size={24} />
-                        {a.user_name}
-                      </div>
-                    ) : '—'}
-                  </td>
-                  <td>{new Date(a.created_at).toLocaleDateString('pt-BR')}</td>
-                  {SIGNING_ENABLED && (
-                    <td><span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{STATUS_LABELS[a.status] || a.status}</span></td>
-                  )}
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-                      <div onClick={e => e.stopPropagation()}>
-                        <button className="ib ib-d" title="Excluir" onClick={() => setConfirm({
-                          title: `Excluir análise de ${periodShort(a)}?`,
-                          message: 'Esta ação é irreversível.',
-                          danger: true, confirmLabel: 'Excluir',
-                          onConfirm: () => deleteAnalysis(a),
-                        })}>
-                          <i className="ti ti-trash"></i>
-                        </button>
-                      </div>
-                      <i className="ti ti-chevron-right" style={{ color: 'var(--t3)' }}></i>
-                    </div>
-                  </td>
+        <>
+          {/* Tabela — desktop e tablet */}
+          <div className="al-table-wrap adm-table-wrap table-scroll" style={{ overflowX: 'auto' }}>
+            <table className="adm-table" style={{ minWidth: 480 }}>
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Exercício</th>
+                  <th className="al-col-user">Criada por</th>
+                  <th>Data</th>
+                  {SIGNING_ENABLED && <th>Status</th>}
+                  <th></th>
                 </tr>
-              ))}
-              {!filtered.length && (
-                <tr><td colSpan={SIGNING_ENABLED ? 6 : 5} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--t3)' }}>Nenhuma análise encontrada.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map(a => (
+                  <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/app/analyses/${a.id}`)}>
+                    <td>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {a.client_name || 'Cliente'}
+                        {!a.client_active && <span className="pill pill-y">Arquivado</span>}
+                      </span>
+                    </td>
+                    <td>{periodShort(a)}</td>
+                    <td className="al-col-user">
+                      {a.user_name ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <UserAvatar user={{ name: a.user_name, avatar: a.user_avatar, avatar_color: a.user_avatar_color }} size={24} />
+                          {a.user_name}
+                        </div>
+                      ) : '—'}
+                    </td>
+                    <td>{new Date(a.created_at).toLocaleDateString('pt-BR')}</td>
+                    {SIGNING_ENABLED && (
+                      <td><span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`}>{STATUS_LABELS[a.status] || a.status}</span></td>
+                    )}
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap', width: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
+                        <div onClick={e => e.stopPropagation()}>
+                          <button className="ib ib-d" title="Excluir" onClick={() => setConfirm({
+                            title: `Excluir análise de ${periodShort(a)}?`,
+                            message: 'Esta ação é irreversível.',
+                            danger: true, confirmLabel: 'Excluir',
+                            onConfirm: () => deleteAnalysis(a),
+                          })}>
+                            <i className="ti ti-trash"></i>
+                          </button>
+                        </div>
+                        <i className="ti ti-chevron-right" style={{ color: 'var(--t3)' }}></i>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!filtered.length && (
+                  <tr><td colSpan={SIGNING_ENABLED ? 6 : 5} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--t3)' }}>Nenhuma análise encontrada.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Cards — mobile */}
+          <div className="al-cards-wrap">
+            {filtered.map(a => (
+              <div key={a.id} onClick={() => navigate(`/app/analyses/${a.id}`)}
+                style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 10, padding: '14px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {a.client_name || 'Cliente'}
+                    </span>
+                    {!a.client_active && <span className="pill pill-y" style={{ flexShrink: 0 }}>Arquivado</span>}
+                    {SIGNING_ENABLED && <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`} style={{ flexShrink: 0 }}>{STATUS_LABELS[a.status] || a.status}</span>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t2)' }}>
+                    <span style={{ color: 'var(--t0)', fontWeight: 500 }}>{periodShort(a)}</span>
+                    <span style={{ color: 'var(--t3)' }}>·</span>
+                    <span>{new Date(a.created_at).toLocaleDateString('pt-BR')}</span>
+                    {a.user_name && (
+                      <>
+                        <span style={{ color: 'var(--t3)' }}>·</span>
+                        <UserAvatar user={{ name: a.user_name, avatar: a.user_avatar, avatar_color: a.user_avatar_color }} size={18} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.user_name}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  <div onClick={e => e.stopPropagation()}>
+                    <button className="ib ib-d" title="Excluir" onClick={() => setConfirm({
+                      title: `Excluir análise de ${periodShort(a)}?`,
+                      message: 'Esta ação é irreversível.',
+                      danger: true, confirmLabel: 'Excluir',
+                      onConfirm: () => deleteAnalysis(a),
+                    })}>
+                      <i className="ti ti-trash"></i>
+                    </button>
+                  </div>
+                  <i className="ti ti-chevron-right" style={{ color: 'var(--t3)', fontSize: 16 }}></i>
+                </div>
+              </div>
+            ))}
+            {!filtered.length && (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--t3)', fontSize: 14 }}>Nenhuma análise encontrada.</div>
+            )}
+          </div>
+        </>
       )}
 
       {confirm && <ConfirmModal {...confirm} onClose={() => setConfirm(null)} />}

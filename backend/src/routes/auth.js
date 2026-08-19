@@ -4,10 +4,11 @@ import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
 import rateLimit from 'express-rate-limit';
 import { db } from '../lib/db.js';
-import { signToken } from '../lib/jwt.js';
+import { signToken, generateRefreshToken, hashRefreshToken } from '../lib/jwt.js';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../lib/email.js';
 import { isValidEmail, trim, badRequest, unauthorized } from '../lib/validate.js';
 import { authRequired, planExempt } from '../middleware/auth.js';
+import { audit, ACTIONS } from '../lib/audit.js';
 import { DEMO_MODE } from '../lib/demo.js';
 
 function timingSafeEqual(a, b) {
@@ -49,6 +50,12 @@ const facebookLimit = rateLimit({
   message: { error: 'Muitas tentativas. Aguarde 1 minuto.' },
   standardHeaders: true, legacyHeaders: false
 });
+const refreshLimit = rateLimit({
+  windowMs: 60_000, max: 20,
+  message: { error: 'Muitas tentativas. Aguarde 1 minuto.' },
+  standardHeaders: true, legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test'
+});
 
 const TENANT_TYPES = ['cooperativa', 'escritorio', 'empresa', 'associacao', 'outro'];
 
@@ -81,6 +88,9 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID || '';
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET || '';
+
+// Validade do refresh token: 90 dias
+const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60_000;
 
 function genCode() {
   return String(crypto.randomInt(100000, 999999));
@@ -171,6 +181,22 @@ async function createTenantWithType(tx, { tenantId, company, companyType, sector
   }
 }
 
+// Emite um par access token + refresh token e persiste o refresh token no banco.
+// Centraliza toda a lógica de emissão para não repetir em cada endpoint de login.
+async function issueTokenPair(user) {
+  const tv = user.token_version ?? 0;
+  const accessToken = signToken({ uid: user.id, cid: user.tenant_id, role: user.role, tv });
+
+  const rawRefresh = generateRefreshToken();
+  const tokenHash = hashRefreshToken(rawRefresh);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS).toISOString();
+  await db.prepare(
+    'INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(nanoid(10), user.id, tokenHash, expiresAt);
+
+  return { token: accessToken, refreshToken: rawRefresh };
+}
+
 // POST /auth/register
 router.post('/register', registerLimit, async (req, res, next) => {
   try {
@@ -180,6 +206,7 @@ router.post('/register', registerLimit, async (req, res, next) => {
     const company = trim(req.body?.company);
     const companyType = trim(req.body?.companyType);
     const sector = trim(req.body?.sector);
+    const termsAccepted = req.body?.terms_accepted;
     const role = 'manager';
 
     const fields = {};
@@ -193,6 +220,9 @@ router.post('/register', registerLimit, async (req, res, next) => {
 
     if (!password) fields.password = 'Crie uma senha.';
     else if (password.length < 8) fields.password = 'Senha muito curta. Mínimo 8 caracteres.';
+
+    // LGPD Art. 7 — consentimento explícito é base legal obrigatória
+    if (!termsAccepted) fields.terms_accepted = 'Aceite os Termos de Uso e a Política de Privacidade para continuar.';
 
     if (Object.keys(fields).length) throw badRequest('Dados inválidos.', fields);
 
@@ -224,8 +254,9 @@ router.post('/register', registerLimit, async (req, res, next) => {
 
     await db.transaction(async (tx) => {
       await createTenantWithType(tx, { tenantId, company, companyType, sector });
-      await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role)
-                        VALUES (?, ?, ?, ?, ?, ?)`).run(userId, tenantId, name, email, hash, role);
+      // consented_at registra o momento do consentimento LGPD (Art. 7, I)
+      await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, consented_at)
+                        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(userId, tenantId, name, email, hash, role);
       await tx.prepare('INSERT INTO email_verifications (id, user_id, code, expires_at) VALUES (?, ?, ?, ?)')
         .run(nanoid(10), userId, code, expires);
     })();
@@ -254,10 +285,10 @@ router.post('/verify-email', verifyLimit, async (req, res, next) => {
     await db.prepare('UPDATE email_verifications SET used = 1 WHERE id = ?').run(rec.id);
     await db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(userId);
 
-    const user = await db.prepare('SELECT id, tenant_id, name, email, role, avatar, avatar_color FROM users WHERE id = ?').get(userId);
+    const user = await db.prepare('SELECT id, tenant_id, name, email, role, avatar, avatar_color, token_version FROM users WHERE id = ?').get(userId);
     const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
-    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token, user: toSafeUser(user, tenant) });
+    const { token, refreshToken } = await issueTokenPair(user);
+    res.json({ token, refreshToken, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
@@ -292,7 +323,7 @@ router.post('/login', loginLimit, async (req, res, next) => {
     if (Object.keys(fields).length) throw badRequest('Dados inválidos.', fields);
 
     const user = await db.prepare(`SELECT id, tenant_id, name, email, password_hash, role, email_verified,
-                                            failed_login_count, locked_until, avatar, avatar_color
+                                            failed_login_count, locked_until, avatar, avatar_color, token_version
                                      FROM users WHERE email = ?`).get(email);
     if (!user) throw unauthorized('E-mail ou senha incorretos.');
 
@@ -336,8 +367,71 @@ router.post('/login', loginLimit, async (req, res, next) => {
     const tenant = user.tenant_id
       ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id)
       : null;
-    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token, user: toSafeUser(user, tenant) });
+    const { token, refreshToken } = await issueTokenPair(user);
+    res.json({ token, refreshToken, user: toSafeUser(user, tenant) });
+  } catch (e) { next(e); }
+});
+
+// POST /auth/refresh — troca um refresh token válido por um novo par access+refresh
+// Implementa rotação de refresh tokens: o token antigo é revogado imediatamente.
+router.post('/refresh', refreshLimit, async (req, res, next) => {
+  try {
+    const rawToken = req.body?.refreshToken || req.body?.refresh_token;
+    if (!rawToken) throw unauthorized('Refresh token ausente.');
+
+    const tokenHash = hashRefreshToken(rawToken);
+    const stored = await db.prepare(`
+      SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked_at,
+             u.id AS uid, u.tenant_id, u.role, u.token_version, u.name, u.email,
+             u.avatar, u.avatar_color
+      FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
+      WHERE rt.token_hash = ?
+    `).get(tokenHash);
+
+    if (!stored) throw unauthorized('Refresh token inválido.');
+    if (stored.revoked_at) throw unauthorized('Refresh token já foi utilizado ou revogado. Faça login novamente.');
+    if (new Date(stored.expires_at).getTime() < Date.now()) throw unauthorized('Refresh token expirado. Faça login novamente.');
+
+    // Revoga o token antigo (rotação — cada refresh token é single-use)
+    await db.prepare('UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ?').run(stored.id);
+
+    // Emite novo par
+    const user = {
+      id: stored.uid, tenant_id: stored.tenant_id, role: stored.role,
+      token_version: stored.token_version, name: stored.name, email: stored.email,
+      avatar: stored.avatar, avatar_color: stored.avatar_color,
+    };
+    const { token, refreshToken } = await issueTokenPair(user);
+
+    const tenant = user.tenant_id
+      ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id)
+      : null;
+    res.json({ token, refreshToken, user: toSafeUser(user, tenant) });
+  } catch (e) { next(e); }
+});
+
+// POST /auth/logout — encerra a sessão: incrementa token_version (invalida todos os
+// access tokens vigentes) e revoga o refresh token específico desta sessão.
+router.post('/logout', planExempt, authRequired, async (req, res, next) => {
+  try {
+    const rawRefresh = req.body?.refreshToken || req.body?.refresh_token;
+
+    // Incrementa token_version — todos os access tokens emitidos antes desta
+    // chamada ficam inválidos na próxima requisição que checar o middleware auth.
+    await db.prepare(
+      'UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?'
+    ).run(req.user.id);
+
+    // Revoga o refresh token desta sessão, se fornecido
+    if (rawRefresh) {
+      const tokenHash = hashRefreshToken(rawRefresh);
+      await db.prepare(
+        'UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND user_id = ?'
+      ).run(tokenHash, req.user.id);
+    }
+
+    await audit(req, ACTIONS.LOGOUT, { targetType: 'user', targetId: req.user.id });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -388,11 +482,43 @@ router.post('/reset-password', resetLimit, async (req, res, next) => {
     }
 
     const hash = await bcrypt.hash(newPassword, 12);
-    await db.prepare('UPDATE users SET password_hash = ?, failed_login_count = 0, locked_until = NULL WHERE id = ?')
-      .run(hash, rec.user_id);
+    // Incrementa token_version para invalidar todas as sessões ativas (access tokens)
+    // e revoga todos os refresh tokens do usuário — garante que quem redefiniu a
+    // senha não encontra outra sessão ativa em outro dispositivo comprometido.
+    await db.prepare(
+      'UPDATE users SET password_hash = ?, failed_login_count = 0, locked_until = NULL, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?'
+    ).run(hash, rec.user_id);
+    await db.prepare('UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(rec.user_id);
     await db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').run(rec.id);
 
     res.json({ ok: true, message: 'Senha redefinida com sucesso. Faça login com a nova senha.' });
+  } catch (e) { next(e); }
+});
+
+// POST /auth/set-password — permite que usuários OAuth (Google/Facebook) definam
+// uma senha local para habilitar o login email+senha além do OAuth.
+// Não exige senha atual porque o usuário OAuth nunca teve uma senha real —
+// o password_hash que existe é um nanoid aleatório gerado no cadastro.
+router.post('/set-password', planExempt, authRequired, async (req, res, next) => {
+  try {
+    const newPassword = req.body?.password || '';
+    if (!newPassword || newPassword.length < 8) {
+      throw badRequest('Senha muito curta. Mínimo 8 caracteres.', { password: 'Mínimo 8 caracteres.' });
+    }
+
+    const user = await db.prepare('SELECT id, google_id, facebook_id, has_password FROM users WHERE id = ?').get(req.user.id);
+
+    // Só disponível para usuários OAuth que ainda não têm senha local
+    if (!user?.google_id && !user?.facebook_id) {
+      throw badRequest('Operação não permitida. Use a troca de senha padrão.');
+    }
+    if (user?.has_password) {
+      throw badRequest('Você já possui uma senha. Use a opção de alteração de senha.');
+    }
+
+    const hash = await bcrypt.hash(newPassword, 12);
+    await db.prepare('UPDATE users SET password_hash = ?, has_password = 1 WHERE id = ?').run(hash, req.user.id);
+    res.json({ ok: true, message: 'Senha definida com sucesso. Agora você pode entrar com e-mail e senha.' });
   } catch (e) { next(e); }
 });
 
@@ -403,10 +529,10 @@ router.post('/google', googleLimit, async (req, res, next) => {
     const email = payload.email.toLowerCase();
     const googleId = payload.sub;
 
-    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, google_id
+    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, google_id, token_version
                                   FROM users WHERE google_id = ?`).get(googleId);
     if (!user) {
-      user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, google_id
+      user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, google_id, token_version
                                 FROM users WHERE email = ?`).get(email);
       if (user && !user.google_id) {
         await db.prepare('UPDATE users SET google_id = ?, email_verified = 1 WHERE id = ?').run(googleId, user.id);
@@ -418,8 +544,8 @@ router.post('/google', googleLimit, async (req, res, next) => {
     }
 
     const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
-    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token, user: toSafeUser(user, tenant) });
+    const { token, refreshToken } = await issueTokenPair(user);
+    res.json({ token, refreshToken, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
@@ -429,8 +555,10 @@ router.post('/google/complete', googleLimit, async (req, res, next) => {
     const company = trim(req.body?.company);
     const companyType = trim(req.body?.companyType);
     const sector = trim(req.body?.sector);
+    const termsAccepted = req.body?.terms_accepted;
 
     const fields = validateTenantFields(company, companyType, sector);
+    if (!termsAccepted) fields.terms_accepted = 'Aceite os Termos de Uso e a Política de Privacidade para continuar.';
     if (Object.keys(fields).length) throw badRequest('Dados inválidos.', fields);
 
     const payload = await verifyGoogleAccessToken(req.body?.accessToken);
@@ -438,7 +566,7 @@ router.post('/google/complete', googleLimit, async (req, res, next) => {
     const googleId = payload.sub;
     const name = trim(payload.name) || email.split('@')[0];
 
-    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color
+    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, token_version
                                   FROM users WHERE google_id = ? OR email = ?`).get(googleId, email);
 
     if (!user) {
@@ -447,18 +575,17 @@ router.post('/google/complete', googleLimit, async (req, res, next) => {
       const randomHash = await bcrypt.hash(nanoid(32), 12);
       await db.transaction(async (tx) => {
         await createTenantWithType(tx, { tenantId, company, companyType, sector });
-        await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified, google_id)
-                          VALUES (?, ?, ?, ?, ?, 'manager', 1, ?)`).run(userId, tenantId, name, email, randomHash, googleId);
+        await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified, google_id, consented_at)
+                          VALUES (?, ?, ?, ?, ?, 'manager', 1, ?, CURRENT_TIMESTAMP)`).run(userId, tenantId, name, email, randomHash, googleId);
       })();
-      // Evita um SELECT redundante — todos os campos já são conhecidos localmente.
-      user = { id: userId, tenant_id: tenantId, name, email, role: 'manager', avatar: null, avatar_color: null };
+      user = { id: userId, tenant_id: tenantId, name, email, role: 'manager', avatar: null, avatar_color: null, token_version: 0 };
     } else {
       await db.prepare('UPDATE users SET google_id = ?, email_verified = 1 WHERE id = ?').run(googleId, user.id);
     }
 
     const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
-    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token, user: toSafeUser(user, tenant) });
+    const { token, refreshToken } = await issueTokenPair(user);
+    res.json({ token, refreshToken, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
@@ -469,10 +596,10 @@ router.post('/facebook', facebookLimit, async (req, res, next) => {
     const email = profile.email.toLowerCase();
     const facebookId = profile.id;
 
-    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, facebook_id
+    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, facebook_id, token_version
                                   FROM users WHERE facebook_id = ?`).get(facebookId);
     if (!user) {
-      user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, facebook_id
+      user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, facebook_id, token_version
                                 FROM users WHERE email = ?`).get(email);
       if (user && !user.facebook_id) {
         await db.prepare('UPDATE users SET facebook_id = ?, email_verified = 1 WHERE id = ?').run(facebookId, user.id);
@@ -484,8 +611,8 @@ router.post('/facebook', facebookLimit, async (req, res, next) => {
     }
 
     const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
-    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token, user: toSafeUser(user, tenant) });
+    const { token, refreshToken } = await issueTokenPair(user);
+    res.json({ token, refreshToken, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
@@ -495,8 +622,10 @@ router.post('/facebook/complete', facebookLimit, async (req, res, next) => {
     const company = trim(req.body?.company);
     const companyType = trim(req.body?.companyType);
     const sector = trim(req.body?.sector);
+    const termsAccepted = req.body?.terms_accepted;
 
     const fields = validateTenantFields(company, companyType, sector);
+    if (!termsAccepted) fields.terms_accepted = 'Aceite os Termos de Uso e a Política de Privacidade para continuar.';
     if (Object.keys(fields).length) throw badRequest('Dados inválidos.', fields);
 
     const profile = await verifyFacebookAccessToken(req.body?.accessToken);
@@ -504,7 +633,7 @@ router.post('/facebook/complete', facebookLimit, async (req, res, next) => {
     const facebookId = profile.id;
     const name = trim(profile.name) || email.split('@')[0];
 
-    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color
+    let user = await db.prepare(`SELECT id, tenant_id, name, email, role, avatar, avatar_color, token_version
                                   FROM users WHERE facebook_id = ? OR email = ?`).get(facebookId, email);
 
     if (!user) {
@@ -513,18 +642,17 @@ router.post('/facebook/complete', facebookLimit, async (req, res, next) => {
       const randomHash = await bcrypt.hash(nanoid(32), 12);
       await db.transaction(async (tx) => {
         await createTenantWithType(tx, { tenantId, company, companyType, sector });
-        await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified, facebook_id)
-                          VALUES (?, ?, ?, ?, ?, 'manager', 1, ?)`).run(userId, tenantId, name, email, randomHash, facebookId);
+        await tx.prepare(`INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified, facebook_id, consented_at)
+                          VALUES (?, ?, ?, ?, ?, 'manager', 1, ?, CURRENT_TIMESTAMP)`).run(userId, tenantId, name, email, randomHash, facebookId);
       })();
-      // Evita um SELECT redundante — todos os campos já são conhecidos localmente.
-      user = { id: userId, tenant_id: tenantId, name, email, role: 'manager', avatar: null, avatar_color: null };
+      user = { id: userId, tenant_id: tenantId, name, email, role: 'manager', avatar: null, avatar_color: null, token_version: 0 };
     } else {
       await db.prepare('UPDATE users SET facebook_id = ?, email_verified = 1 WHERE id = ?').run(facebookId, user.id);
     }
 
     const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
-    const token = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token, user: toSafeUser(user, tenant) });
+    const { token, refreshToken } = await issueTokenPair(user);
+    res.json({ token, refreshToken, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
@@ -558,7 +686,10 @@ router.post('/accept-invite/:token', async (req, res, next) => {
   try {
     const { token } = req.params;
     const password = req.body?.password;
+    const termsAccepted = req.body?.terms_accepted;
+
     if (!password || password.length < 8) throw badRequest('Senha deve ter pelo menos 8 caracteres.', { password: 'Mínimo 8 caracteres.' });
+    if (!termsAccepted) throw badRequest('Aceite os Termos de Uso para continuar.', { terms_accepted: 'Obrigatório.' });
 
     const invite = await db.prepare(`
       SELECT i.id, i.user_id, i.expires_at, i.used_at, u.tenant_id, u.role
@@ -571,17 +702,19 @@ router.post('/accept-invite/:token', async (req, res, next) => {
     if (new Date(invite.expires_at) < new Date()) throw badRequest('Este convite expirou.');
 
     const hash = await bcrypt.hash(password, 12);
-    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, invite.user_id);
+    await db.prepare(
+      'UPDATE users SET password_hash = ?, has_password = 1, consented_at = CURRENT_TIMESTAMP WHERE id = ?'
+    ).run(hash, invite.user_id);
     await db.prepare('UPDATE invites SET used_at = CURRENT_TIMESTAMP WHERE id = ?').run(invite.id);
 
     const user = await db.prepare(`
-      SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.avatar, u.avatar_color
+      SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.avatar, u.avatar_color, u.token_version
       FROM users u WHERE u.id = ?
     `).get(invite.user_id);
     const tenant = user.tenant_id ? await db.prepare('SELECT name, plan, type, self_client_id FROM tenants WHERE id = ?').get(user.tenant_id) : null;
 
-    const jwtToken = signToken({ uid: user.id, cid: user.tenant_id, role: user.role });
-    res.json({ token: jwtToken, user: toSafeUser(user, tenant) });
+    const { token: jwtToken, refreshToken } = await issueTokenPair(user);
+    res.json({ token: jwtToken, refreshToken, user: toSafeUser(user, tenant) });
   } catch (e) { next(e); }
 });
 
