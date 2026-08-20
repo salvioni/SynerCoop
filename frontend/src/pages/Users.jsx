@@ -50,7 +50,7 @@ export default function Users() {
     <>
       <div className="page-body">
         <PageHeader
-          subtitle="Membros do escritório"
+          subtitle="Quem usa o sistema"
           title="Equipe"
           action={isManager && <button className="btn btn-p" onClick={openInvite}><i className="ti ti-plus"></i> Convidar membro</button>}
         />

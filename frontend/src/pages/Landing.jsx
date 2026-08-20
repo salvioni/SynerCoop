@@ -1,35 +1,25 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../lib/auth.jsx';
-import { ApiError } from '../lib/api.js';
-import { DEMO_ACCOUNTS } from '../lib/constants.js';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { PLANS as PLAN_INFO, PLAN_ORDER } from '../lib/plans.js';
-
-const DEMO_ORDER = ['empresa', 'admin', 'escritorio', 'associacao', 'outro', 'cooperativa'];
+import { api, ApiError } from '../lib/api.js';
 
 const STEPS = [
-  { n: '01', icon: 'ti-upload', t: 'Suba o balanço', d: 'Faça upload do balanço patrimonial e DRE em PDF ou Excel da empresa cliente.' },
-  { n: '02', icon: 'ti-sparkles', t: 'IA extrai e calcula', d: 'Nossa IA lê o documento, identifica as contas e calcula 30+ indicadores financeiros.' },
-  { n: '03', icon: 'ti-file-text', t: 'Relatório pronto', d: 'Diagnóstico, SWOT e recomendações estratégicas — pronto para revisar e enviar.' },
+  { n: '01', icon: 'ti-upload', t: 'Suba o arquivo', d: 'Um único documento em PDF ou Excel, com o balanço patrimonial e a demonstração de resultado. O período — mensal, bimestral, trimestral, semestral ou anual — é reconhecido pelo nome do arquivo.' },
+  { n: '02', icon: 'ti-sparkles', t: 'A IA extrai e o sistema calcula', d: 'A IA identifica as contas do documento e o sistema calcula 37 indicadores em cinco grupos, sem digitação manual.' },
+  { n: '03', icon: 'ti-file-text', t: 'Relatório pronto', d: 'Diagnóstico SWOT, recomendações e gráficos de evolução entre períodos. Exporte em Word ou baixe a planilha preenchida.' },
 ];
 
 const INDICATORS = [
-  'Liquidez corrente, geral, seca e imediata',
-  'ROE, ROA, ROI e margem EBITDA',
-  'Endividamento total e perfil da dívida',
-  'PMR, PMP, PME e ciclo financeiro',
-  'Capital de giro, NCG e tesouraria',
-  'Análise SWOT financeira automática',
-  'Recomendações estratégicas geradas por IA',
+  'Liquidez geral, corrente e seca',
+  'Rentabilidade do patrimônio líquido (ROE), do ativo (ROA), dos ingressos e do capital integralizado',
+  'Endividamento total, perfil da dívida e alavancagem sobre EBITDA',
+  'PME, PMR, PMP, ciclo operacional e ciclo financeiro',
+  'Capital de giro, NCG e tesouraria pelo Modelo de Fleuriet',
+  'Gráficos de evolução comparando os períodos já analisados',
+  'Diagnóstico SWOT e recomendações estratégicas geradas por IA',
 ];
 
 const PLANS = PLAN_ORDER.map(k => PLAN_INFO[k]);
-
-const PREVIEW = [
-  { l: 'Liquidez Corrente', v: '1,47', s: 'Bom', c: 'var(--green-t)' },
-  { l: 'Endividamento Total', v: '62,25%', s: 'Crítico', c: 'var(--red-t)' },
-  { l: 'PMR', v: '1.433 dias', s: 'Crítico', c: 'var(--red-t)' },
-];
 
 // ── Modais de Termos, Privacidade e Contato ─────────────────────────────────
 const LEGAL = {
@@ -50,7 +40,7 @@ const LEGAL = {
         <p>A plataforma é fornecida "como está". Fazemos o possível para manter alta disponibilidade, mas não garantimos acesso ininterrupto.</p>
         <h3>6. Alterações</h3>
         <p>Estes termos podem ser atualizados a qualquer momento. O uso continuado da plataforma após a publicação de alterações implica aceitação das novas condições.</p>
-        <p style={{ marginTop: 24, color: 'var(--t3)', fontSize: 12 }}>Última atualização: janeiro de 2026</p>
+        <p style={{ marginTop: 24, color: 'var(--t3)', fontSize: 12 }}>Última atualização: agosto de 2026</p>
       </>
     ),
   },
@@ -71,31 +61,7 @@ const LEGAL = {
         <p>Usamos apenas cookies estritamente necessários para autenticação e funcionamento da plataforma. Não utilizamos cookies de rastreamento ou publicidade.</p>
         <h3>6. Contato</h3>
         <p>Dúvidas sobre privacidade: <a href="mailto:privacidade@synercoop.com.br" style={{ color: 'var(--blue-text)' }}>privacidade@synercoop.com.br</a></p>
-        <p style={{ marginTop: 24, color: 'var(--t3)', fontSize: 12 }}>Última atualização: janeiro de 2026</p>
-      </>
-    ),
-  },
-  contato: {
-    title: 'Contato',
-    content: (
-      <>
-        <p>Estamos aqui para ajudar. Escolha o canal mais adequado à sua necessidade:</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
-          {[
-            { icon: 'ti-mail', label: 'Suporte técnico', value: 'suporte@synercoop.com.br', href: 'mailto:suporte@synercoop.com.br' },
-            { icon: 'ti-shield', label: 'Privacidade e dados', value: 'privacidade@synercoop.com.br', href: 'mailto:privacidade@synercoop.com.br' },
-            { icon: 'ti-building', label: 'Parcerias e comercial', value: 'contato@synercoop.com.br', href: 'mailto:contato@synercoop.com.br' },
-          ].map(({ icon, label, value, href }) => (
-            <a key={label} href={href} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: 'var(--bg2)', borderRadius: 10, border: '1px solid var(--bd)', color: 'var(--t0)', textDecoration: 'none' }}>
-              <i className={`ti ${icon}`} style={{ fontSize: 22, color: 'var(--blue-text)', flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 2 }}>{label}</div>
-                <div style={{ fontWeight: 500 }}>{value}</div>
-              </div>
-            </a>
-          ))}
-        </div>
-        <p style={{ marginTop: 24, fontSize: 13, color: 'var(--t2)' }}>Tempo médio de resposta: até 1 dia útil.</p>
+        <p style={{ marginTop: 24, color: 'var(--t3)', fontSize: 12 }}>Última atualização: agosto de 2026</p>
       </>
     ),
   },
@@ -129,40 +95,215 @@ function LegalModal({ k, onClose }) {
   );
 }
 
-export default function Landing() {
-  const navigate = useNavigate();
-  const { login } = useAuth();
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const [legal, setLegal] = useState(null); // 'termos' | 'privacidade' | 'contato'
+// ── Mockup do produto no topo da página ─────────────────────────────────────
+// Desenhado em SVG, não capturado de tela: uma imagem de print envelhece a cada
+// mudança de layout, sai borrada em telas retina e pesa. Aqui os mesmos
+// componentes do painel real — cartões de indicador, evolução da liquidez,
+// semáforo — são reconstruídos com os tokens de cor do sistema, então o topo do
+// site continua parecido com o produto sozinho.
 
-  // A landing page usa sempre o tema claro — é a identidade visual oficial.
-  // Remove a classe dark enquanto o componente estiver montado e restaura ao sair.
-  useEffect(() => {
-    const root = document.documentElement;
-    const wasDark = root.classList.contains('theme-dark');
-    root.classList.remove('theme-dark');
-    return () => { if (wasDark) root.classList.add('theme-dark'); };
-  }, []);
-  // true enquanto o cliente insiste após uma falha de rede/502-504 — cobre o
-  // "cold start" do backend gratuito (Render), que pode levar até ~1min pra
-  // acordar após ficar inativo (ver fetchWithRetry em lib/api.js).
-  const [connecting, setConnecting] = useState(false);
+const MOCK_KPI = [
+  { l: 'Liquidez Corrente', v: '1,47', s: 'Bom',     c: 'var(--green-t)' },
+  { l: 'Endividamento',     v: '62,3%', s: 'Atenção', c: 'var(--yellow-t)' },
+  { l: 'Ciclo Financeiro',  v: '54d',  s: 'Bom',     c: 'var(--green-t)' },
+];
 
-  function goAfterAuth(user) {
-    navigate(user.role === 'admin' ? '/admin' : '/app/dashboard');
-  }
+// Séries do gráfico de linha, em unidades do próprio viewBox (0–100 x 0–46).
+const SERIE_CORRENTE = [[0,30],[46,25],[92,26],[138,17],[184,14],[230,9]];
+const SERIE_SECA     = [[0,38],[46,35],[92,33],[138,30],[184,28],[230,24]];
+const linha = pts => pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]} ${p[1]}`).join(' ');
 
-  async function demoLogin(key) {
-    setBusy(true); setErr('');
+const MOCK_BARRAS = [38, 52, 45, 63, 71, 86];
+
+function HeroMock() {
+  return (
+    <div className="ld-preview" aria-hidden="true">
+      <div className="ld-preview-bar">
+        <span className="ld-dot" style={{ background: 'var(--red)', opacity: .55 }}></span>
+        <span className="ld-dot" style={{ background: 'var(--yellow-t)', opacity: .65 }}></span>
+        <span className="ld-dot" style={{ background: 'var(--green-t)', opacity: .65 }}></span>
+        <span className="ld-preview-url">synercoop.app/clientes/cooperativa-agro-uniao</span>
+      </div>
+
+      <div className="ld-mock">
+        <div className="ld-mock-head">
+          <div>
+            <div className="ld-mock-eyebrow">Cooperativa</div>
+            <div className="ld-mock-title">Agro União Ltda</div>
+          </div>
+          <div className="ld-mock-chip">Exercício 2025</div>
+        </div>
+
+        <div className="ld-mock-kpis">
+          {MOCK_KPI.map(k => (
+            <div key={k.l} className="ld-mock-kpi">
+              <div className="ld-mock-kpi-l">{k.l}</div>
+              <div className="ld-mock-kpi-v">{k.v}</div>
+              <div className="ld-mock-kpi-s" style={{ color: k.c }}>● {k.s}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="ld-mock-charts">
+          <div className="ld-mock-card">
+            <div className="ld-mock-card-t">Evolução da liquidez</div>
+            <svg viewBox="0 0 230 46" className="ld-mock-svg" preserveAspectRatio="none">
+              {[4, 17, 30, 43].map(y => (
+                <line key={y} x1="0" y1={y} x2="230" y2={y} stroke="var(--bd)" strokeWidth=".5" />
+              ))}
+              <path d={linha(SERIE_SECA)} fill="none" stroke="var(--ch-gold)" strokeWidth="2"
+                    vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+              <path d={linha(SERIE_CORRENTE)} fill="none" stroke="var(--ch-blue)" strokeWidth="2"
+                    vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <div className="ld-mock-legend">
+              <span><i style={{ background: 'var(--ch-blue)' }}></i>Corrente</span>
+              <span><i style={{ background: 'var(--ch-gold)' }}></i>Seca</span>
+            </div>
+          </div>
+
+          <div className="ld-mock-card">
+            <div className="ld-mock-card-t">Receita por exercício</div>
+            <div className="ld-mock-bars">
+              {MOCK_BARRAS.map((h, i) => (
+                <span key={i} style={{ height: `${h}%` }}></span>
+              ))}
+            </div>
+            <div className="ld-mock-legend">
+              <span><i style={{ background: 'var(--ch-blue)' }}></i>Receita líquida</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="ld-mock-foot">
+          <i className="ti ti-sparkles"></i>
+          Sobras crescem pelo 3º exercício seguido; o ciclo financeiro caiu 11 dias.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Seção de contato ────────────────────────────────────────────────────────
+// Era um modal aberto por um link no rodapé, com três endereços de e-mail para
+// a pessoa copiar. Agora é uma seção como Produto e Planos: quem quer falar
+// escreve ali mesmo, e o "Fale conosco" do plano Enterprise cai aqui em vez de
+// mandar a pessoa criar uma conta que não é o que ela quer.
+
+const CANAIS = [
+  { icon: 'ti-building', label: 'Comercial e parcerias', value: 'contato@synercoop.com.br' },
+  { icon: 'ti-mail',     label: 'Suporte técnico',       value: 'suporte@synercoop.com.br' },
+  { icon: 'ti-shield',   label: 'Privacidade e dados',   value: 'privacidade@synercoop.com.br' },
+];
+
+function Contato() {
+  const [form, setForm] = useState({ nome: '', email: '', empresa: '', telefone: '', mensagem: '', website: '' });
+  const [erros, setErros] = useState({});
+  const [erroGeral, setErroGeral] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [enviado, setEnviado] = useState(false);
+
+  const set = campo => e => {
+    setForm(f => ({ ...f, [campo]: e.target.value }));
+    setErros(er => (er[campo] ? { ...er, [campo]: undefined } : er));
+  };
+
+  async function enviar(e) {
+    e.preventDefault();
+    setEnviando(true); setErros({}); setErroGeral('');
     try {
-      const acc = DEMO_ACCOUNTS[key];
-      const user = await login(acc.email, acc.password, () => setConnecting(true));
-      goAfterAuth(user);
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Não foi possível entrar.');
-    } finally { setBusy(false); setConnecting(false); }
+      await api.post('/contact', form);
+      setEnviado(true);
+    } catch (err) {
+      // Erros de campo voltam em `fields`; o resto vira uma linha acima do
+      // botão — a pessoa não pode ficar sem saber que a mensagem não saiu.
+      if (err instanceof ApiError && err.fields && Object.keys(err.fields).length) setErros(err.fields);
+      else setErroGeral(err instanceof ApiError ? err.message : 'Não foi possível enviar agora. Tente novamente.');
+    } finally {
+      setEnviando(false);
+    }
   }
+
+  return (
+    <section id="contato" className="ld-section-alt">
+      <div className="ld-container ld-contato">
+        <div>
+          <div className="ld-section-label">Contato</div>
+          <h2 className="ld-section-title">Vamos conversar.</h2>
+          <p className="ld-contato-sub">
+            Quer entender se o SynerCoop atende o seu caso, precisa de um plano sob medida
+            ou tem uma dúvida sobre os relatórios? Escreva — respondemos em até um dia útil.
+          </p>
+          <ul className="ld-canais">
+            {CANAIS.map(c => (
+              <li key={c.value}>
+                <i className={`ti ${c.icon}`}></i>
+                <div>
+                  <div className="ld-canal-l">{c.label}</div>
+                  <a href={`mailto:${c.value}`} className="ld-canal-v">{c.value}</a>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="ld-form-card">
+          {enviado ? (
+            <div className="ld-form-ok" role="status">
+              <i className="ti ti-circle-check"></i>
+              <h3>Mensagem enviada</h3>
+              <p>Obrigado, {form.nome.split(' ')[0]}. Respondemos no e-mail {form.email} em até um dia útil.</p>
+            </div>
+          ) : (
+            <form onSubmit={enviar} noValidate>
+              <div className="ld-form-row">
+                <div>
+                  <label className="inp-label" htmlFor="ct-nome">Nome</label>
+                  <input id="ct-nome" className="inp" value={form.nome} onChange={set('nome')} autoComplete="name" />
+                  {erros.nome && <div className="ld-form-err">{erros.nome}</div>}
+                </div>
+                <div>
+                  <label className="inp-label" htmlFor="ct-email">E-mail</label>
+                  <input id="ct-email" type="email" className="inp" value={form.email} onChange={set('email')} autoComplete="email" />
+                  {erros.email && <div className="ld-form-err">{erros.email}</div>}
+                </div>
+              </div>
+              <div className="ld-form-row">
+                <div>
+                  <label className="inp-label" htmlFor="ct-empresa">Organização <span className="ld-opt">(opcional)</span></label>
+                  <input id="ct-empresa" className="inp" value={form.empresa} onChange={set('empresa')} autoComplete="organization" />
+                </div>
+                <div>
+                  <label className="inp-label" htmlFor="ct-tel">Telefone <span className="ld-opt">(opcional)</span></label>
+                  <input id="ct-tel" className="inp" value={form.telefone} onChange={set('telefone')} autoComplete="tel" />
+                </div>
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <label className="inp-label" htmlFor="ct-msg">Mensagem</label>
+                <textarea id="ct-msg" className="inp ld-textarea" rows={5} value={form.mensagem} onChange={set('mensagem')}
+                  placeholder="Conte um pouco sobre a sua organização e o que você precisa." />
+                {erros.mensagem && <div className="ld-form-err">{erros.mensagem}</div>}
+              </div>
+
+              {/* Isca para robôs — invisível e fora da ordem de tabulação. */}
+              <input className="ld-hp" tabIndex={-1} autoComplete="off" aria-hidden="true"
+                value={form.website} onChange={set('website')} />
+
+              {erroGeral && <div className="ld-form-err" style={{ marginTop: 14 }}>{erroGeral}</div>}
+              <button type="submit" className="btn btn-p" disabled={enviando}
+                style={{ width: '100%', justifyContent: 'center', marginTop: 20, padding: '12px 20px' }}>
+                {enviando ? 'Enviando…' : 'Enviar mensagem'}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export default function Landing() {
+  const [legal, setLegal] = useState(null); // 'termos' | 'privacidade'
 
   return (
     <div className="landing">
@@ -177,88 +318,44 @@ export default function Landing() {
             <a href="#produto">Produto</a>
             <a href="#fluxo">Como funciona</a>
             <a href="#planos">Planos</a>
+            <a href="#contato">Contato</a>
           </nav>
           <div className="ld-header-actions">
             <Link to="/login" className="ld-link">Entrar</Link>
-            <Link to="/register" className="btn btn-p">Começar grátis</Link>
+            <Link to="/register" className="btn btn-p">Experimente grátis</Link>
           </div>
         </div>
       </header>
 
       {/* Hero */}
-      <section className="ld-container" style={{ paddingTop: 80, paddingBottom: 96 }}>
-        <div style={{ maxWidth: 720 }}>
+      <section className="ld-container ld-hero">
+        <div className="ld-hero-copy">
           <div className="ld-badge-pill">
-            <i className="ti ti-sparkles" style={{ color: 'var(--gold)' }}></i> Beta privado · Para escritórios
+            <i className="ti ti-sparkles" style={{ color: 'var(--gold)' }}></i> Para cooperativas, escritórios contábeis, empresas e associações
           </div>
           <h1 className="ld-hero-title">
-            Análise financeira de uma empresa inteira, em <span className="ld-accent">90 segundos</span>.
+            Análise financeira da sua empresa em <span className="ld-accent">segundos</span>.
           </h1>
           <p className="ld-hero-sub">
-            Contadores e advogados sobem o balanço da empresa cliente em PDF. Nossa IA extrai os dados,
-            calcula os indicadores e entrega um relatório de diagnóstico pronto para enviar.
+            Suba um único arquivo em PDF ou Excel. A IA lê o balanço e a demonstração de resultado,
+            o sistema calcula 37 indicadores e monta o relatório com diagnóstico e recomendações —
+            pronto para revisar e entregar. Analise a sua própria organização ou uma carteira de clientes.
           </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 36 }}>
+          <div className="ld-hero-cta">
             <Link to="/register" className="btn btn-p" style={{ padding: '12px 20px' }}>
-              Criar conta gratuita <i className="ti ti-arrow-right"></i>
+              Experimente grátis <i className="ti ti-arrow-right"></i>
             </Link>
-            <Link to="/app/dashboard" className="btn" style={{ padding: '12px 20px' }}>
-              Ver demonstração
-            </Link>
+            <a href="#planos" className="btn" style={{ padding: '12px 20px' }}>
+              Veja nossos planos
+            </a>
           </div>
           <div className="ld-trust">
-            <span><i className="ti ti-shield-check" style={{ color: 'var(--green-t)' }}></i> Dados isolados por escritório</span>
+            <span><i className="ti ti-shield-check" style={{ color: 'var(--green-t)' }}></i> Dados isolados por conta</span>
             <span><i className="ti ti-lock" style={{ color: 'var(--green-t)' }}></i> Conformidade LGPD</span>
           </div>
         </div>
 
-        {/* Preview card */}
-        <div className="ld-preview">
-          <div className="ld-preview-bar">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="ld-dot" style={{ background: 'var(--red)', opacity: 0.6 }}></span>
-              <span className="ld-dot" style={{ background: 'var(--yellow-t)', opacity: 0.7 }}></span>
-              <span className="ld-dot" style={{ background: 'var(--green-t)', opacity: 0.7 }}></span>
-              <span style={{ marginLeft: 12, fontFamily: 'ui-monospace, monospace', fontSize: 12, color: 'var(--t2)' }}>synercoop.app/relatorio/cooperativa-agro-uniao</span>
-            </div>
-            <span style={{ fontSize: 12, color: 'var(--green-t)' }}>● ao vivo</span>
-          </div>
-          <div className="ld-preview-grid">
-            {PREVIEW.map(k => (
-              <div key={k.l} className="ld-preview-cell">
-                <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--t2)' }}>{k.l}</div>
-                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 36, marginTop: 8 }}>{k.v}</div>
-                <div style={{ fontSize: 12, color: k.c, marginTop: 8 }}>● {k.s}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Demonstração — entrar direto com uma conta de exemplo */}
-      <section className="ld-container" style={{ paddingBottom: 80 }}>
-        <div style={{ maxWidth: 560, marginBottom: 24 }}>
-          <div className="ld-section-label">Ver na prática</div>
-          <h2 className="ld-section-title">Entre com uma conta de demonstração.</h2>
-          <p style={{ color: 'var(--t2)', marginTop: 8 }}>
-            Sem cadastro — escolha um tipo de conta pra ver o painel funcionando.
-          </p>
-        </div>
-
-        {connecting && <div className="err-banner" style={{ marginBottom: 16, maxWidth: 480, background: 'var(--blue-dim)', color: 'var(--blue-text)' }}>Conectando ao servidor… a primeira tentativa pode levar até 1 minuto.</div>}
-        {err && <div className="err-banner" style={{ marginBottom: 16, maxWidth: 480 }}>{err}</div>}
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, maxWidth: 720 }}>
-          {DEMO_ORDER.map(key => {
-            const acc = DEMO_ACCOUNTS[key];
-            return (
-              <button key={key} type="button" onClick={() => demoLogin(key)} disabled={busy}
-                className="btn" style={{ width: '100%', justifyContent: 'center' }}>
-                <i className={`ti ${acc.icon}`}></i> Entrar como {acc.label} (demo)
-              </button>
-            );
-          })}
-        </div>
+        <HeroMock />
       </section>
 
       {/* Como funciona */}
@@ -293,7 +390,9 @@ export default function Landing() {
             </h2>
             <p style={{ color: 'var(--t2)', marginTop: 24, lineHeight: 1.625 }}>
               Cobrimos a metodologia tradicional de análise contábil: liquidez, rentabilidade, endividamento,
-              capacidade operacional e capital de giro. Você revisa, ajusta e gera o PDF do relatório.
+              capacidade operacional e tesouraria — 37 indicadores calculados a cada análise. A cada novo período
+              enviado, os gráficos de evolução se atualizam sozinhos. Você revisa, ajusta o texto e exporta o
+              relatório em Word ou a planilha do Balanço Perguntado já preenchida.
             </p>
           </div>
           <ul className="ld-indicator-list">
@@ -329,14 +428,24 @@ export default function Landing() {
                     <li key={f}><span style={{ color: 'var(--gold)' }}>✓</span> {f}</li>
                   ))}
                 </ul>
-                <Link to="/register" className={`btn ${p.highlight ? 'btn-p' : ''}`} style={{ width: '100%', justifyContent: 'center', marginTop: 28 }}>
-                  {p.cta}
-                </Link>
+                {/* Enterprise é "sob consulta": mandar pro cadastro daria à
+                    pessoa uma conta de teste, que não é o que ela pediu. */}
+                {p.priceNum === null ? (
+                  <a href="#contato" className={`btn ${p.highlight ? 'btn-p' : ''}`} style={{ width: '100%', justifyContent: 'center', marginTop: 28 }}>
+                    {p.cta}
+                  </a>
+                ) : (
+                  <Link to="/register" className={`btn ${p.highlight ? 'btn-p' : ''}`} style={{ width: '100%', justifyContent: 'center', marginTop: 28 }}>
+                    {p.cta}
+                  </Link>
+                )}
               </div>
             ))}
           </div>
         </div>
       </section>
+
+      <Contato />
 
       {/* Footer */}
       <footer className="ld-footer">
@@ -347,11 +456,12 @@ export default function Landing() {
             <span style={{ color: 'var(--t3)' }}>© 2026</span>
           </div>
           <div style={{ display: 'flex', gap: 24, fontSize: 14, color: 'var(--t2)' }}>
-            {['termos', 'privacidade', 'contato'].map(k => (
-              <button key={k} onClick={() => setLegal(k)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, fontSize: 'inherit', textTransform: 'capitalize' }}>
-                {k === 'termos' ? 'Termos' : k === 'privacidade' ? 'Privacidade' : 'Contato'}
+            {['termos', 'privacidade'].map(k => (
+              <button key={k} onClick={() => setLegal(k)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, fontSize: 'inherit' }}>
+                {k === 'termos' ? 'Termos' : 'Privacidade'}
               </button>
             ))}
+            <a href="#contato" style={{ color: 'inherit', textDecoration: 'none' }}>Contato</a>
           </div>
         </div>
       </footer>

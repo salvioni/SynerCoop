@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { useAccountInfo } from '../lib/accountInfo.jsx';
 import { api, uploadFile, ApiError, downloadFile } from '../lib/api.js';
-import { getPlan } from '../lib/plans.js';
+import { getPlan, trialStatus } from '../lib/plans.js';
 import { TENANT_TYPES } from '../lib/constants.js';
 import UserAvatar, { AVATAR_COLORS } from '../components/UserAvatar.jsx';
 import ConfirmModal from '../components/ConfirmModal.jsx';
@@ -13,6 +13,16 @@ export default function Settings() {
   const { user, refresh } = useAuth();
   const { refetch: refetchAccountInfo } = useAccountInfo();
   const tenantType = TENANT_TYPES.find(t => t.value === user?.tenant_type) || TENANT_TYPES.find(t => t.value === 'escritorio');
+  // Quem faz parte da organização tem nome diferente conforme o tipo — chamar
+  // cooperado de "membro" numa cooperativa soa a software genérico.
+  const MEMBER_LABEL = {
+    cooperativa: 'Número de cooperados',
+    associacao:  'Número de associados',
+    escritorio:  'Número de colaboradores',
+    empresa:     'Número de colaboradores',
+    outro:       'Número de membros',
+  };
+  const memberLabel = MEMBER_LABEL[user?.tenant_type] || MEMBER_LABEL.outro;
   const { theme, setTheme } = useTheme();
   const location = useLocation();
   const [info, setInfo] = useState(null);
@@ -25,6 +35,8 @@ export default function Settings() {
   const [draftCnpj, setDraftCnpj] = useState('');
   const [draftPhone, setDraftPhone] = useState('');
   const [draftBillingEmail, setDraftBillingEmail] = useState('');
+  const [memberCount, setMemberCount] = useState('');
+  const [draftMemberCount, setDraftMemberCount] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [editProfile, setEditProfile] = useState(false);
@@ -64,6 +76,7 @@ export default function Settings() {
       setCnpj(d.cnpj || '');
       setPhone(d.phone || '');
       setBillingEmail(d.billingEmail || '');
+      setMemberCount(d.memberCount ?? '');
       setBrandLogo(d.logo || null);
     }).catch(() => {});
     loadMembers();
@@ -79,7 +92,7 @@ export default function Settings() {
   }, [location.hash]);
 
   function loadMembers() {
-    api.get('/users').then(r => setMembers(r.users || [])).catch(() => {});
+    return api.get('/users').then(r => setMembers(r.users || [])).catch(() => {});
   }
 
   async function inviteMember() {
@@ -178,6 +191,7 @@ export default function Settings() {
     setDraftCnpj(cnpj);
     setDraftPhone(phone);
     setDraftBillingEmail(billingEmail);
+    setDraftMemberCount(memberCount === null || memberCount === undefined ? '' : String(memberCount));
     setEditOffice(true);
   }
   function cancelEdit() {
@@ -196,7 +210,7 @@ export default function Settings() {
     if (draftBillingEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draftBillingEmail.trim())) { setSaveOfficeErr('E-mail de cobrança inválido.'); return; }
     setSaving(true);
     try {
-      await api.patch('/account', { name: draft, cnpj: draftCnpj, phone: draftPhone, billingEmail: draftBillingEmail });
+      await api.patch('/account', { name: draft, cnpj: draftCnpj, phone: draftPhone, billingEmail: draftBillingEmail, memberCount: draftMemberCount });
       if (pendingLogoFile) await uploadFile('/account/logo', pendingLogoFile);
       else if (logoRemoved) await api.del('/account/logo');
       await Promise.all([refresh(), refetchAccountInfo()]);
@@ -206,6 +220,7 @@ export default function Settings() {
       setCnpj(d.cnpj || '');
       setPhone(d.phone || '');
       setBillingEmail(d.billingEmail || '');
+      setMemberCount(d.memberCount ?? '');
       setBrandLogo(d.logo || null);
       setPendingLogoFile(null);
       setLogoRemoved(false);
@@ -245,7 +260,10 @@ export default function Settings() {
       } else if (avatarColor !== (user?.avatar_color || null)) {
         await api.patch('/account/avatar-color', { color: avatarColor });
       }
-      await refresh();
+      // refresh() atualiza o contexto de auth (sidebar, avatar do topo), mas a
+      // lista de membros veio de /users no mount e ficaria com o avatar/cor
+      // antigos até um F5. Recarrega junto para a tela inteira ficar coerente.
+      await Promise.all([refresh(), loadMembers()]);
       setPendingAvatarFile(null);
       setAvatarRemoved(false);
       setEditProfile(false);
@@ -410,6 +428,7 @@ export default function Settings() {
               {cnpj && <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 2 }}><i className="ti ti-id-badge" style={{ fontSize: 12, marginRight: 4 }}></i>{cnpj}</div>}
               {phone && <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 2 }}><i className="ti ti-phone" style={{ fontSize: 12, marginRight: 4 }}></i>{phone}</div>}
               {billingEmail && <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 2 }}><i className="ti ti-mail" style={{ fontSize: 12, marginRight: 4 }}></i>{billingEmail}</div>}
+              {memberCount !== '' && memberCount != null && <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 2 }}><i className="ti ti-users" style={{ fontSize: 12, marginRight: 4 }}></i>{memberCount} {memberLabel.replace('Número de ', '')}</div>}
             </div>
           </div>
         ) : (
@@ -418,17 +437,17 @@ export default function Settings() {
               <span className="inp-label">Logo {tenantType.article} {tenantType.label.toLowerCase()}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: 10 }}>
                 <div style={{
-                  position: 'relative', width: 64, height: 64, flexShrink: 0, cursor: 'pointer',
+                  position: 'relative', width: 48, height: 48, flexShrink: 0, cursor: 'pointer',
                 }} onClick={() => brandLogoRef.current?.click()}>
                   <div style={{
-                    width: 64, height: 64, borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--bd)',
+                    width: 48, height: 48, borderRadius: 11, background: 'var(--bg2)', border: '1px solid var(--bd)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                     ...(brandLogo ? { backgroundImage: `url(${brandLogo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}),
                   }}>
-                    {!brandLogo && <i className="ti ti-building" style={{ fontSize: 24, color: 'var(--t3)' }}></i>}
+                    {!brandLogo && <i className="ti ti-building" style={{ fontSize: 20, color: 'var(--t3)' }}></i>}
                   </div>
                   <div style={{
-                    position: 'absolute', bottom: -4, right: -4, width: 22, height: 22, borderRadius: '50%',
+                    position: 'absolute', bottom: -3, right: -3, width: 19, height: 19, borderRadius: '50%',
                     background: 'var(--bg1)', border: '2px solid var(--bg0)', display: 'flex', alignItems: 'center', justifyContent: 'center',
                     boxShadow: '0 1px 3px rgba(0,0,0,.25)',
                   }}>
@@ -468,16 +487,24 @@ export default function Settings() {
                 <span className="inp-label">Telefone</span>
                 <input className="inp" value={draftPhone} onChange={e => setDraftPhone(maskPhone(e.target.value))} placeholder="(00) 00000-0000" style={{ marginTop: 6 }} inputMode="numeric" />
               </label>
+              <label style={{ display: 'block' }}>
+                <span className="inp-label">{memberLabel}</span>
+                <input className="inp" type="number" min="0" step="1" value={draftMemberCount}
+                  onChange={e => setDraftMemberCount(e.target.value)} placeholder="Opcional"
+                  style={{ marginTop: 6 }} inputMode="numeric" />
+              </label>
             </div>
           </>
         )}
       </section>
       </form>
 
-      {/* ── Membros ── */}
+      {/* ── Quem usa o sistema ── */}
+      {/* "Membros" era ambíguo: numa cooperativa confunde com cooperados, e
+          numa empresa com colaboradores. Aqui a lista é só de quem tem login. */}
       <section style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginTop: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: removeMemberErr ? 12 : 20 }}>
-          <h2 className="settings-h2">Membros</h2>
+          <h2 className="settings-h2">Quem usa o sistema</h2>
           <button className="btn btn-p" onClick={openInvite}><i className="ti ti-user-plus"></i> Convidar</button>
         </div>
         {removeMemberErr && (
@@ -492,10 +519,13 @@ export default function Settings() {
             const justSent = resendDone === m.id;
             return (
               <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderTop: i > 0 ? '1px solid var(--bd)' : 'none' }}>
-                <UserAvatar user={m} size={38} />
+                {/* O próprio usuário é desenhado a partir do contexto de auth,
+                    que já está atualizado no instante do salvamento — evita
+                    piscar o avatar antigo enquanto /users não responde. */}
+                <UserAvatar user={m.id === user?.id ? { ...m, name: user.name, avatar: user.avatar, avatar_color: user.avatar_color } : m} size={38} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t0)' }}>
-                    {m.name}
+                    {m.id === user?.id ? user.name : m.name}
                     {m.id === user?.id && <span style={{ fontSize: 11, color: 'var(--t3)', fontWeight: 400, marginLeft: 6 }}>você</span>}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--t2)', marginTop: 1 }}>{m.email}</div>
@@ -558,28 +588,48 @@ export default function Settings() {
           const limit = plan.limit;
           const unlimited = limit === Infinity;
           const pct = unlimited ? 100 : Math.min(100, (used / limit) * 100);
+          const trial = trialStatus(info);
+          const fimTeste = info?.trialEndsAt
+            ? new Date(info.trialEndsAt).toLocaleDateString('pt-BR')
+            : null;
           return (
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
                 <div>
                   <div style={{ fontSize: 12, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Plano atual</div>
                   <div style={{ fontFamily: 'var(--font-serif)', fontSize: 20, color: 'var(--t0)' }}>
-                    {plan.label} · {plan.price}<span style={{ fontSize: 13, color: 'var(--t2)', fontFamily: 'inherit' }}>/mês</span>
+                    {/* No teste não existe mensalidade a exibir — a informação
+                        que importa é até quando ele vale. */}
+                    {trial
+                      ? plan.label
+                      : <>{plan.label} · {plan.price}<span style={{ fontSize: 13, color: 'var(--t2)', fontFamily: 'inherit' }}>/mês</span></>}
                   </div>
+                  {trial && (
+                    <div style={{ fontSize: 13, marginTop: 4, color: trial.expirado || trial.acabando ? 'var(--yellow-t)' : 'var(--t2)' }}>
+                      {trial.expirado
+                        ? `Encerrado em ${fimTeste}. Suas análises seguem disponíveis para consulta.`
+                        : `${trial.texto}${fimTeste ? ` — até ${fimTeste}` : ''}`}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn">Histórico</button>
                   <button className="btn btn-p">Upgrade Enterprise</button>
                 </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-                <span style={{ fontSize: 13, color: 'var(--t2)' }}>Análises este mês</span>
-                <span style={{ fontSize: 13, color: 'var(--t1)', fontWeight: 500 }}>
-                  {unlimited ? `${used} utilizadas` : `${used} de ${limit}`}
-                </span>
-              </div>
-              <div style={{ height: 6, borderRadius: 999, background: 'var(--bg2)', overflow: 'hidden' }}>
-                <div style={{ height: '100%', borderRadius: 999, background: 'var(--gold)', width: `${pct}%`, transition: 'width .4s ease' }} />
+              {/* Medidor limitado em largura: atravessando o cartão inteiro ele
+                  pesava mais que a informação que carrega, e o rótulo ficava
+                  separado do número por um vão enorme. */}
+              <div style={{ maxWidth: 320 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, color: 'var(--t2)' }}>Análises este mês</span>
+                  <span style={{ fontSize: 13, color: 'var(--t1)', fontWeight: 500 }}>
+                    {unlimited ? `${used} utilizadas` : `${used} de ${limit}`}
+                  </span>
+                </div>
+                <div style={{ height: 5, borderRadius: 999, background: 'var(--bg2)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', borderRadius: 999, background: 'var(--gold)', width: `${pct}%`, transition: 'width .4s ease' }} />
+                </div>
               </div>
             </>
           );

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, uploadFile, ApiError } from '../lib/api.js';
+import { api, uploadFile, downloadFile, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useAccountInfo } from '../lib/accountInfo.jsx';
 import { useBackNavigate } from '../lib/useBackNavigate.js';
-import { getPlan } from '../lib/plans.js';
+import { getPlan, trialStatus } from '../lib/plans.js';
+import { limiteMensalMsg, TRIAL_EXPIRADO_MSG } from '../lib/newAnalysis.jsx';
 import ClientFormModal from '../components/ClientFormModal.jsx';
 import ConfirmModal from '../components/ConfirmModal.jsx';
 
@@ -32,13 +33,16 @@ export default function NewAnalysis() {
   const [drag, setDrag] = useState(false);
   const [err, setErr] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [inadimplencia, setInadimplencia] = useState('');
   const [clientModal, setClientModal] = useState(false);
   const [hintArrow, setHintArrow] = useState(null);
   const [loadingStep, setLoadingStep] = useState(0);
   const [loadingPct, setLoadingPct] = useState(0);
   const [aiMsgIdx, setAiMsgIdx] = useState(0);
   const [clientAnalyses, setClientAnalyses] = useState([]);
+  // Resultado da checagem de período pelo nome do arquivo (ver
+  // GET /clients/:id/check-period). null = não checado / nada a dizer.
+  const [dupWarn, setDupWarn] = useState(null);
+  const [forceUpload, setForceUpload] = useState(false);
   const fileRef = useRef(null);
   const step1WrapRef = useRef(null);
   const addClientBtnRef = useRef(null);
@@ -56,6 +60,11 @@ export default function NewAnalysis() {
   );
 
   const selectedClient = clients.find(c => c.id === clientId);
+  // Numa conta de entidade única o "cliente" é a própria conta. O nome vindo de
+  // /clients foi buscado na montagem da tela e congela — se a pessoa renomear a
+  // empresa em Ajustes, esta tela continuaria mostrando o nome antigo. O
+  // accountInfo é a fonte viva desse nome.
+  const displayName = (isSingleEntity && accountInfo?.companyName) || selectedClient?.name;
 
   // Busca análises existentes do cliente selecionado assim que ele é escolhido
   // pra mostrar os períodos já cadastrados ANTES de o usuário perder tempo enviando
@@ -113,6 +122,17 @@ export default function NewAnalysis() {
     setStep(2);
   }
 
+  async function baixarModelo() {
+    try {
+      const blob = await downloadFile('/analyses/modelo');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'balanco-perguntado.xlsx';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { setErr(e.message || 'Não foi possível baixar o modelo.'); }
+  }
+
   function selectFile(f) {
     if (!f) return;
     const ext = f.name.split('.').pop().toLowerCase();
@@ -122,6 +142,15 @@ export default function NewAnalysis() {
     }
     setFile(f);
     setErr('');
+    setDupWarn(null);
+    setForceUpload(false);
+    // Avisa já na seleção se o nome do arquivo aponta para um período que o
+    // cliente já tem — antes de gastar a extração por IA.
+    if (clientId) {
+      api.get(`/clients/${clientId}/check-period?filename=${encodeURIComponent(f.name)}`)
+        .then(r => { if (r.duplicate || r.periodMismatch) setDupWarn(r); })
+        .catch(() => {});
+    }
   }
 
   async function doAnalyze() {
@@ -141,10 +170,10 @@ export default function NewAnalysis() {
       const dspNonNull = Object.values(ex.dsp || {}).filter(v => v != null).length;
       if (bpNonNull + dspNonNull < 3) {
         setErr(
-          'Não encontramos dados financeiros neste arquivo. Verifique se é um ' +
-          'balanço patrimonial ou demonstrativo de resultado de uma cooperativa, ' +
-          'e que o documento está legível. Se o PDF for escaneado (imagem), ' +
-          'tente exportar em Excel ou usar um PDF gerado pelo sistema contábil.'
+          'Não encontramos dados financeiros neste arquivo. Verifique se ele traz o ' +
+          'balanço patrimonial e a demonstração de resultado, e que o documento está ' +
+          'legível. Se o PDF for escaneado (imagem), tente exportar em Excel ou usar ' +
+          'um PDF gerado pelo sistema contábil.'
         );
         setProcessing(false);
         setStep(2);
@@ -155,10 +184,6 @@ export default function NewAnalysis() {
       const dspClean = {};
       Object.entries(ex.bp || {}).forEach(([k, v]) => { if (v != null) bpClean[k] = Number(v) || 0; });
       Object.entries(ex.dsp || {}).forEach(([k, v]) => { if (v != null) dspClean[k] = Number(v) || 0; });
-      // inadimplência é dado gerencial (não vem do documento) — adicionado
-      // separadamente ao DSP quando o usuário informa antes de enviar.
-      const inadPct = parseFloat(inadimplencia);
-      if (!isNaN(inadPct) && inadPct >= 0) dspClean.inadimplencia_pct = inadPct / 100;
       const saved = await api.post(`/clients/${clientId}/analyses`, {
         bp: bpClean, dsp: dspClean, year: ex.year || new Date().getFullYear(),
         confidence: ex.confidence, notes: ex.notes, detail: ex.detail || null,
@@ -232,36 +257,43 @@ export default function NewAnalysis() {
   const plan = getPlan(accountInfo?.plan);
   const monthlyUsed = accountInfo?.monthlyAnalyses ?? 0;
   const limitReached = plan.limit !== Infinity && monthlyUsed >= plan.limit;
-  const blockingMsg = limitMsg || (limitReached
-    ? `Você já usou ${monthlyUsed} de ${plan.limit} análises deste mês no plano ${plan.label}. Faça upgrade para continuar ou aguarde a virada do mês.`
-    : null);
-
-  if (blockingMsg) {
-    return (
-      <div className="page-body" style={{ maxWidth: 680, margin: '0 auto', width: '100%' }}>
-        <button className="back" onClick={goBack} style={{ marginBottom: 16 }}>
-          <i className="ti ti-arrow-left"></i> Voltar
-        </button>
-        <ConfirmModal
-          title="Limite de análises atingido"
-          message={blockingMsg}
-          confirmLabel="Ver plano"
-          onConfirm={() => navigate('/app/settings')}
-          onClose={goBack}
-        />
-      </div>
-    );
-  }
+  // `limitMsg` vem do servidor quando alguém do mesmo escritório consumiu a
+  // última análise enquanto esta tela estava aberta. Nos dois casos o aviso é
+  // um modal sobre a tela atual — antes ele aparecia sozinho numa página em
+  // branco, o que fazia parecer que a "Nova análise" tinha quebrado.
+  const trial = trialStatus(accountInfo);
+  const blockingMsg = trial?.expirado ? TRIAL_EXPIRADO_MSG
+    : (limitMsg || (limitReached ? limiteMensalMsg(plan, monthlyUsed) : null));
 
   return (
     <div className="page-body" style={{ maxWidth: 680, margin: '0 auto', width: '100%' }}>
+      {blockingMsg && (
+        <ConfirmModal
+          title={trial?.expirado ? 'Teste grátis encerrado' : 'Limite de análises atingido'}
+          message={blockingMsg}
+          confirmLabel="Ver planos"
+          cancelLabel="Entendi"
+          onConfirm={() => navigate('/app/settings')}
+          onClose={goBack}
+        />
+      )}
       <button className="back" onClick={goBack} style={{ marginBottom: 16 }}>
         <i className="ti ti-arrow-left"></i> Voltar
       </button>
 
       <h1 className="page-h1" style={{ marginBottom: 8 }}>Nova análise</h1>
-      <p style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 32 }}>
-        Suba o balanço da empresa cliente — a IA extrai os dados e calcula os indicadores.
+      <p style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 6, lineHeight: 1.6, maxWidth: 620 }}>
+        Envie o balanço patrimonial e a demonstração de resultado{isSingleEntity ? '' : ' da empresa cliente'} num
+        único arquivo, em PDF ou Excel. A partir dele o sistema calcula os indicadores e monta o relatório.
+      </p>
+      {/* Os dois documentos raramente chegam com esse nome: a contabilidade
+          entrega "Demonstrações Contábeis", "Relatório Contábil", "Balanço".
+          Nomear as variações evita que a pessoa ache que não tem o arquivo
+          certo — o extrator já procura por todos esses títulos dentro do PDF. */}
+      <p style={{ fontSize: 13, color: 'var(--t3)', marginBottom: 32, lineHeight: 1.6, maxWidth: 620 }}>
+        Costuma vir da contabilidade com o nome de Demonstrações Contábeis, Demonstrações
+        Financeiras, Relatório Contábil ou Balanço — qualquer um deles serve, desde que
+        traga as duas peças.
       </p>
 
       {/* Stepper */}
@@ -359,15 +391,18 @@ export default function NewAnalysis() {
       {/* Step 2: Upload */}
       {step === 2 && (
         <div>
-          <div style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <i className="ti ti-building" style={{ fontSize: 16 }}></i>
-            <span style={{ fontWeight: 500, color: 'var(--t0)' }}>{selectedClient?.name}</span>
-            {!isSingleEntity && (
+          {/* Só faz sentido identificar o cliente quando há mais de um pra
+              escolher. Numa conta de entidade única essa linha repetiria o
+              nome que já está na barra lateral. */}
+          {!isSingleEntity && (
+            <div style={{ fontSize: 14, color: 'var(--t2)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <i className="ti ti-building" style={{ fontSize: 16 }}></i>
+              <span style={{ fontWeight: 500, color: 'var(--t0)' }}>{displayName}</span>
               <button onClick={() => setStep(1)} style={{ background: 'none', border: 'none', color: 'var(--t2)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
                 trocar
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           {clientAnalyses.length > 0 && (
             <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 8, fontSize: 13, color: 'var(--t1)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -403,39 +438,75 @@ export default function NewAnalysis() {
             )}
           </div>
 
-          {/* Campo de inadimplência — dado gerencial que não consta no balanço.
-              Relevante especialmente para cooperativas de crédito e análise de
-              carteira. Aparece sempre (independente de ter arquivo selecionado)
-              pra o usuário poder preencher enquanto escolhe o arquivo. */}
-          <div style={{ marginTop: 20, padding: '16px', background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t0)' }}>Taxa de inadimplência</span>
-              <span style={{ fontSize: 12, color: 'var(--t3)' }}>opcional</span>
+          {/* O modelo fica junto do envio: é neste ponto que a pessoa descobre
+              que não tem o arquivo. Antes ficava nas telas de estado vazio, que
+              acabavam explicando o mesmo fluxo em três lugares. */}
+          {!file && (
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <button type="button" onClick={baixarModelo} style={{
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--t2)',
+                display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'underline', textUnderlineOffset: 3,
+              }}>
+                <i className="ti ti-file-spreadsheet" style={{ fontSize: 15 }} />
+                Não tem o arquivo? Baixe o modelo do Balanço Perguntado
+              </button>
             </div>
-            <p style={{ fontSize: 12, color: 'var(--t2)', margin: '0 0 10px' }}>
-              Percentual de inadimplência da carteira — dado gerencial que não consta no balanço.
-              Quando informado, aparece nos indicadores de liquidez e na narrativa.
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
-                className="inp"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                placeholder="0,00"
-                value={inadimplencia}
-                onChange={e => setInadimplencia(e.target.value)}
-                style={{ width: 110 }}
-              />
-              <span style={{ fontSize: 14, color: 'var(--t2)' }}>%</span>
-            </div>
-          </div>
+          )}
 
-          {file && (
+          {/* Período já analisado — detectado pelo nome do arquivo, antes de
+              gastar a extração. Não bloqueia de vez: o nome pode enganar, então
+              fica a escolha de enviar assim mesmo. */}
+          {dupWarn && !forceUpload && (
+            <div style={{
+              marginTop: 16, padding: '14px 16px', borderRadius: 10,
+              background: dupWarn.periodMismatch ? 'var(--red-dim)' : 'var(--yellow-dim)',
+              border: `1px solid ${dupWarn.periodMismatch ? 'rgba(208,29,33,.35)' : 'rgba(235,136,31,.35)'}`,
+            }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <i className="ti ti-alert-triangle" style={{ fontSize: 18, color: dupWarn.periodMismatch ? 'var(--red-t)' : 'var(--yellow-t)', flexShrink: 0, marginTop: 1 }} />
+                <div style={{ fontSize: 13, color: 'var(--t1)', lineHeight: 1.6 }}>
+                  {dupWarn.periodMismatch ? (
+                    <>
+                      As análises deste cliente são <strong>{dupWarn.periodMismatch.esperado}</strong> e
+                      este arquivo é <strong>{dupWarn.periodMismatch.recebido}</strong>. Períodos de
+                      tamanhos diferentes não se comparam entre si, então cada cliente segue um
+                      padrão só — envie um documento {dupWarn.periodMismatch.esperado}.
+                    </>
+                  ) : (
+                    <>
+                      Este cliente já tem uma análise de{' '}
+                      <strong>{dupWarn.detected?.period_label || `Exercício ${dupWarn.detected?.year}`}</strong>,
+                      e o nome do arquivo aponta para esse mesmo período. Analisar de novo
+                      criaria uma duplicata e consumiria uma análise do seu plano.
+                    </>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                {dupWarn.analysisId && (
+                  <button className="btn" onClick={() => navigate(`/app/analyses/${dupWarn.analysisId}`)}>
+                    <i className="ti ti-eye"></i> Ver a análise existente
+                  </button>
+                )}
+                <button className="btn" onClick={() => { setFile(null); setDupWarn(null); }}>
+                  Escolher outro arquivo
+                </button>
+                {/* Duplicata é só um palpite pelo nome do arquivo, então dá pra
+                    insistir. Período incompatível é regra do sistema — o
+                    servidor recusaria de qualquer forma. */}
+                {!dupWarn.periodMismatch && (
+                  <button className="btn" onClick={() => setForceUpload(true)}>
+                    Enviar assim mesmo
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {file && (!dupWarn || (forceUpload && !dupWarn.periodMismatch)) && (
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button className="btn" style={{ flex: 1, justifyContent: 'center' }}
-                onClick={() => { setFile(null); setErr(''); }}>
+                onClick={() => { setFile(null); setErr(''); setDupWarn(null); setForceUpload(false); }}>
                 Remover
               </button>
               <button className="btn btn-p" style={{ flex: 2, justifyContent: 'center' }}
@@ -460,7 +531,7 @@ export default function NewAnalysis() {
           <div style={{ paddingTop: 16 }}>
             <div style={{ textAlign: 'center', marginBottom: 28 }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t0)', marginBottom: 4 }}>
-                Processando análise de <strong>{selectedClient?.name}</strong>
+                Processando análise de <strong>{displayName}</strong>
               </div>
               <div style={{ fontSize: 13, color: 'var(--t2)' }}>Analisando o documento com IA — não feche esta aba</div>
             </div>

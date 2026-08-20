@@ -10,6 +10,7 @@ import { stripe } from '../lib/stripe.js';
 import { saveImage, deleteImage } from '../lib/storage.js';
 import { signToken, generateRefreshToken, hashRefreshToken } from '../lib/jwt.js';
 import logger from '../lib/logger.js';
+import { trialEndFrom, diasRestantesTrial, trialExpirado, getUserLimit, getClientLimit, getMonthlyLimit } from '../lib/plans.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
 
@@ -17,11 +18,16 @@ const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60_000;
 
 const router = Router();
 
+// Infinity não sobrevive ao JSON (vira null). Como null já significa "não
+// informado" em vários campos desta resposta, o ilimitado viaja como a string
+// 'ilimitado' — explícito dos dois lados.
+const jsonLimit = v => (v === Infinity ? 'ilimitado' : v);
+
 // GET /account — dados do escritório + estatísticas
 router.get('/', planExempt, authRequired, async (req, res, next) => {
   try {
     const tenant = await db.prepare(
-      'SELECT name, plan, logo, cnpj, phone, billing_email FROM tenants WHERE id = ?'
+      'SELECT name, plan, logo, cnpj, phone, billing_email, member_count, type, sector, created_at, trial_ends_at FROM tenants WHERE id = ?'
     ).get(req.user.tenant_id);
     const clientCount = await db.prepare(
       'SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ? AND active = 1'
@@ -42,6 +48,18 @@ router.get('/', planExempt, authRequired, async (req, res, next) => {
       activeClients:   clientCount?.cnt      || 0,
       totalAnalyses:   analysisCount?.cnt    || 0,
       monthlyAnalyses: monthlyCount,
+      memberCount:     tenant?.member_count ?? null,
+      type:            tenant?.type          || null,
+      sector:          tenant?.sector        || null,
+      createdAt:       tenant?.created_at    || null,
+      // O front usa isto pra avisar quantos dias faltam e pra desligar as
+      // ações de escrita quando o teste vence — sem recalcular a regra lá.
+      trialEndsAt:     tenant?.trial_ends_at || null,
+      trialDaysLeft:   diasRestantesTrial(tenant),
+      trialExpired:    trialExpirado(tenant),
+      userLimit:       jsonLimit(getUserLimit(tenant?.plan)),
+      clientLimit:     jsonLimit(getClientLimit(tenant?.plan)),
+      analysisLimit:   jsonLimit(getMonthlyLimit(tenant?.plan)),
     });
   } catch (e) { next(e); }
 });
@@ -52,11 +70,15 @@ router.post('/select-plan', planExempt, authRequired, managerOnly, async (req, r
     if (req.body?.plan !== 'trial') throw badRequest('Plano inválido.');
     if (req.user.plan) throw badRequest('Este escritório já tem um plano ativo.');
 
+    // O relógio do teste começa aqui, e não no cadastro: entre criar a conta e
+    // escolher o plano pode passar um dia inteiro verificando e-mail, e esse
+    // dia não deve ser descontado dos 7.
+    const trialEndsAt = trialEndFrom(new Date());
     await db.prepare(
-      `UPDATE tenants SET plan = 'trial', onboarded_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).run(req.user.tenant_id);
-    await audit(req, ACTIONS.PLAN_SELECTED, { targetType: 'tenant', targetId: req.user.tenant_id, meta: { plan: 'trial' } });
-    res.json({ ok: true, plan: 'trial' });
+      `UPDATE tenants SET plan = 'trial', onboarded_at = CURRENT_TIMESTAMP, trial_ends_at = ? WHERE id = ?`
+    ).run(trialEndsAt, req.user.tenant_id);
+    await audit(req, ACTIONS.PLAN_SELECTED, { targetType: 'tenant', targetId: req.user.tenant_id, meta: { plan: 'trial', trialEndsAt } });
+    res.json({ ok: true, plan: 'trial', trialEndsAt });
   } catch (e) { next(e); }
 });
 
@@ -67,6 +89,18 @@ router.patch('/', authRequired, managerOnly, async (req, res, next) => {
     const cnpj         = trim(req.body?.cnpj)         || null;
     const phone        = trim(req.body?.phone)        || null;
     const billingEmail = trim(req.body?.billingEmail) || null;
+    // Campo opcional: string vazia limpa, número inválido é rejeitado em vez de
+    // virar 0 silenciosamente (0 cooperados e "não informado" são coisas
+    // diferentes).
+    const rawMembers = req.body?.memberCount;
+    let memberCount = null;
+    if (rawMembers !== undefined && rawMembers !== null && String(rawMembers).trim() !== '') {
+      const n = Number(rawMembers);
+      if (!Number.isInteger(n) || n < 0) {
+        throw badRequest('Número de membros inválido.', { memberCount: 'Informe um número inteiro.' });
+      }
+      memberCount = n;
+    }
 
     if (!name) throw badRequest('Nome do escritório é obrigatório.', { name: 'Campo obrigatório.' });
     if (billingEmail && !isValidEmail(billingEmail)) {
@@ -74,10 +108,19 @@ router.patch('/', authRequired, managerOnly, async (req, res, next) => {
     }
 
     const tenant = await db.prepare(
-      'SELECT stripe_customer_id, billing_email FROM tenants WHERE id = ?'
+      'SELECT stripe_customer_id, billing_email, self_client_id FROM tenants WHERE id = ?'
     ).get(req.user.tenant_id);
-    await db.prepare('UPDATE tenants SET name = ?, cnpj = ?, phone = ?, billing_email = ? WHERE id = ?')
-      .run(name, cnpj, phone, billingEmail, req.user.tenant_id);
+    await db.prepare('UPDATE tenants SET name = ?, cnpj = ?, phone = ?, billing_email = ?, member_count = ? WHERE id = ?')
+      .run(name, cnpj, phone, billingEmail, memberCount, req.user.tenant_id);
+
+    // Contas de entidade única têm um cliente-espelho (criado no cadastro com o
+    // nome do tenant) que é o que aparece em "Nova análise", na lista de
+    // análises e no cabeçalho dos relatórios. Sem este UPDATE ele congela com o
+    // nome antigo e a conta passa a se chamar de dois jeitos diferentes.
+    if (tenant?.self_client_id) {
+      await db.prepare('UPDATE clients SET name = ?, cnpj = ? WHERE id = ? AND tenant_id = ?')
+        .run(name, cnpj || '', tenant.self_client_id, req.user.tenant_id);
+    }
 
     // Mantém customer do Stripe sincronizado com o e-mail de cobrança
     if (stripe && tenant?.stripe_customer_id && billingEmail !== tenant.billing_email) {
@@ -152,11 +195,16 @@ router.post('/logo', authRequired, managerOnly, upload.single('file'), async (re
     if (!IMAGE_ALLOWED_MIMES.includes(req.file.mimetype)) {
       throw badRequest('Formato não suportado. Use PNG, JPG ou BMP.');
     }
-    const prev = await db.prepare('SELECT logo FROM tenants WHERE id = ?').get(req.user.tenant_id);
+    const prev = await db.prepare('SELECT logo, self_client_id FROM tenants WHERE id = ?').get(req.user.tenant_id);
     await deleteImage(prev?.logo);
 
     const value = await saveImage(req.file.buffer, req.file.mimetype, 'logos', req.user.tenant_id);
     await db.prepare('UPDATE tenants SET logo = ? WHERE id = ?').run(value, req.user.tenant_id);
+    // Espelha no cliente-espelho — ver comentário em PATCH /account.
+    if (prev?.self_client_id) {
+      await db.prepare('UPDATE clients SET logo = ? WHERE id = ? AND tenant_id = ?')
+        .run(value, prev.self_client_id, req.user.tenant_id);
+    }
     res.json({ logo: value });
   } catch (e) { next(e); }
 });
@@ -164,9 +212,13 @@ router.post('/logo', authRequired, managerOnly, upload.single('file'), async (re
 // DELETE /account/logo — somente gerentes
 router.delete('/logo', authRequired, managerOnly, async (req, res, next) => {
   try {
-    const prev = await db.prepare('SELECT logo FROM tenants WHERE id = ?').get(req.user.tenant_id);
+    const prev = await db.prepare('SELECT logo, self_client_id FROM tenants WHERE id = ?').get(req.user.tenant_id);
     await deleteImage(prev?.logo);
     await db.prepare('UPDATE tenants SET logo = NULL WHERE id = ?').run(req.user.tenant_id);
+    if (prev?.self_client_id) {
+      await db.prepare('UPDATE clients SET logo = NULL WHERE id = ? AND tenant_id = ?')
+        .run(prev.self_client_id, req.user.tenant_id);
+    }
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

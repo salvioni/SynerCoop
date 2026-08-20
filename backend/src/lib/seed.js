@@ -90,6 +90,7 @@ export async function seedDb() {
   };
 
   const { calculateIndicators } = await import('./calculator.js');
+  const { monthsInPeriod } = await import('./period.js');
   const indicators2024 = calculateIndicators({ bp: bp2024, dsp: dsp2024 });
   const indicators2023 = calculateIndicators({ bp: bp2023, dsp: dsp2023 });
 
@@ -117,7 +118,7 @@ export async function seedDb() {
     { id: 'an-demo-sem125',   periodLabel: '1º Semestre de 2025',  bp: { ativo_circulante: 1095000, caixa: 370000, contas_receber_cp: 228000, adiantamentos: 55000, estoques: 439000, ativo_nao_circulante: 790000, ativo_permanente: 790000, total_ativo: 1885000, passivo_circulante: 718000, emprestimos_cp: 95000, passivo_nao_circulante: 438000, emprestimos_lp: 41000, patrimonio_liquido: 729000, capital_social: 500000, capital_integralizar: 0 }, dsp: { receita_bruta: 108000, impostos_venda: -2800, receita_liquida: 105200, custos_vendas: 0, despesas_operacionais: 0, ebitda: 105200, sobras_perdas: 105000 } },
   ];
   for (const p of periodsCitrus) {
-    const ind = calculateIndicators({ bp: p.bp, dsp: p.dsp });
+    const ind = calculateIndicators({ bp: p.bp, dsp: p.dsp, periodMonths: monthsInPeriod(p.periodLabel) });
     insAnalysis.run(p.id, client1Id, 2025, p.periodLabel, JSON.stringify(p.bp), JSON.stringify(p.dsp), JSON.stringify(ind), `Dado demo — ${p.periodLabel}`);
   }
 
@@ -127,7 +128,7 @@ export async function seedDb() {
   const bp_emp_tri25 = { ativo_circulante: 605000, caixa: 195000, contas_receber_cp: 240000, adiantamentos: 22000, estoques: 143000, ativo_nao_circulante: 415000, ativo_permanente: 415000, total_ativo: 1020000, passivo_circulante: 325000, emprestimos_cp: 63000, passivo_nao_circulante: 178000, emprestimos_lp: 35000, patrimonio_liquido: 517000, capital_social: 400000, capital_integralizar: 0 };
   const dsp_emp_tri25 = { receita_bruta: 232000, devolucoes: -4500, impostos_venda: -21000, receita_liquida: 206500, custos_vendas: -121000, resultado_bruto: 85500, despesas_operacionais: -61000, ebitda: 24500, depreciacao: -5500, sobras_perdas: 16000 };
   insAnalysis.run('an-demo-emp24', client2Id, 2024, null, JSON.stringify(bp_emp24), JSON.stringify(dsp_emp24), JSON.stringify(calculateIndicators({ bp: bp_emp24, dsp: dsp_emp24 })), 'Dado demo — exercício anual');
-  insAnalysis.run('an-demo-emp-tri125', client2Id, 2025, '1º Trimestre de 2025', JSON.stringify(bp_emp_tri25), JSON.stringify(dsp_emp_tri25), JSON.stringify(calculateIndicators({ bp: bp_emp_tri25, dsp: dsp_emp_tri25 })), 'Dado demo — 1º Trimestre de 2025');
+  insAnalysis.run('an-demo-emp-tri125', client2Id, 2025, '1º Trimestre de 2025', JSON.stringify(bp_emp_tri25), JSON.stringify(dsp_emp_tri25), JSON.stringify(calculateIndicators({ bp: bp_emp_tri25, dsp: dsp_emp_tri25, periodMonths: 3 })), 'Dado demo — 1º Trimestre de 2025');
 
   // Conta admin de demonstração — fixa, independente de ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD,
   // pra sempre existir em dev sem exigir configuração de env (usada pelos botões de demo).

@@ -13,6 +13,7 @@ import analysesRoutes from './routes/analyses.js';
 import statsRoutes from './routes/stats.js';
 import adminRoutes from './routes/admin.js';
 import stripeRoutes from './routes/stripe.js';
+import contactRoutes from './routes/contact.js';
 
 export function createApp() {
   const app = express();
@@ -119,6 +120,7 @@ export function createApp() {
   app.use('/stats',    statsRoutes);
   app.use('/admin',    adminRoutes);
   app.use('/stripe',   stripeRoutes);
+  app.use('/contact',  contactRoutes);
 
   // Sentry captura erros antes do handler customizado
   app.use(sentryErrorHandler());

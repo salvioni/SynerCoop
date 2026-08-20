@@ -33,6 +33,15 @@ export function paymentRequired(message = 'Escolha um plano para continuar.') {
   return new HttpError(402, message, { code: 'PLAN_REQUIRED' });
 }
 
+/**
+ * Teste vencido. Código próprio, e não PLAN_REQUIRED: o front redireciona
+ * PLAN_REQUIRED para /select-plan, que é a tela de quem ainda não escolheu
+ * plano nenhum — mandar pra lá quem já teve um teste seria dar a volta errada.
+ */
+export function trialExpired(message) {
+  return new HttpError(402, message, { code: 'TRIAL_EXPIRED' });
+}
+
 export function notFound(message = 'Não encontrado.') {
   return new HttpError(404, message);
 }

@@ -24,6 +24,16 @@
   --t1: #2A3442;
   --t2: oklch(0.5 0.02 255);
   --t3: #8A929D;
+  /* Paleta dos gráficos. Vive no CSS (e não no JS) porque o SVG resolve
+     var() em atributos de apresentação — assim os gráficos trocam de cor
+     junto com o tema, sem re-render nem contexto de tema no React. */
+  --ch-navy:  #0D1E3B;
+  --ch-blue:  #1B3E8A;
+  --ch-gold:  #C87F1A;
+  --ch-green: #14874E;
+  --ch-red:   #D01D21;
+  --ch-slate: #4A6280;
+  --ch-muted: #8A929D;
   --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --r: 8px; --rl: 12px; --rs: 5px;
@@ -69,6 +79,16 @@
   --t1: #B8BCC5;
   --t2: #6B7380;
   --t3: #3D4A5C;
+  /* Os tons impressos do relatório não sobrevivem ao fundo escuro — o
+     azul-marinho fica indistinguível da própria superfície. Aqui são os mesmos
+     papéis reescalonados para o fundo #0F1828 (contraste ≥ 3:1 em todos). */
+  --ch-navy:  #00737C;
+  --ch-blue:  #4885DF;
+  --ch-gold:  #BE8700;
+  --ch-green: #169F65;
+  --ch-red:   #D74745;
+  --ch-slate: #9C4FAE;
+  --ch-muted: #77818C;
   --sidebar-bg: #0F1828;
   --sidebar-fg: #B8BCC5;
   --sidebar-accent: #1E2D45;
@@ -95,7 +115,7 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 
 /* ── Layout ── */
 .layout { display: flex; height: 100vh; overflow: hidden }
-.sidebar { width: 285px; flex-shrink: 0; background: var(--sidebar-bg); display: flex; flex-direction: column; color: var(--sidebar-fg) }
+.sidebar { width: 258px; flex-shrink: 0; background: var(--sidebar-bg); display: flex; flex-direction: column; color: var(--sidebar-fg) }
 .s-logo { padding: 24px 20px 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--sidebar-border) }
 .s-badge { width: 36px; height: 36px; background: var(--sidebar-primary); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: var(--font-serif); font-size: 18px; color: var(--sidebar-primary-fg); flex-shrink: 0 }
 .s-brand { display: flex; flex-direction: column }
@@ -105,6 +125,7 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .s-office-label { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: rgba(230,229,221,.6); margin-bottom: 2px; font-weight: 400 }
 .s-office-name { font-size: 14px; font-weight: 500; color: #E6E5DD }
 .s-office-plan { font-size: 11px; color: rgba(230,229,221,.65); margin-top: 2px }
+.s-office-plan-alerta { color: var(--sidebar-primary); font-weight: 500 }
 .s-cta { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 12px 14px 4px; padding: 10px 16px; border-radius: 8px; background: var(--sidebar-primary); color: var(--sidebar-primary-fg); font-size: 14px; font-weight: 500; border: none; cursor: pointer; transition: opacity .15s }
 .s-cta:hover { opacity: .9 }
 .s-cta i { font-size: 16px }
@@ -486,7 +507,9 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .dash-card-icon { font-size: 20px; color: var(--t3) }
 .dash-card-val { font-family: var(--font-serif); font-size: 32px; font-weight: 400; color: var(--t0); line-height: 1.1 }
 .dash-card-sub { font-size: 13px; color: var(--t2); margin-top: 4px }
-.dash-cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px }
+/* align-items: start — sem isso o grid estica os dois cartões até a altura
+   do mais alto, e o resumo ganha um vão vazio embaixo do último botão. */
+.dash-cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; align-items: start }
 .dash-section { background: var(--bg1); border: 1px solid var(--bd); border-radius: 12px; padding: 20px }
 .dash-section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px }
 .dash-section-title { font-family: var(--font-serif); font-size: 20px; font-weight: 500; letter-spacing: 0.012em; color: var(--t0) }
@@ -543,17 +566,52 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .ld-link { font-size: 14px; padding: 6px 12px; border-radius: 6px; color: var(--t1) }
 .ld-link:hover { background: var(--bg2) }
 .ld-badge-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--t2); border: 1px solid var(--bd); border-radius: 999px; padding: 4px 12px }
-.ld-hero-title { font-family: var(--font-serif); font-size: 72px; line-height: 1.05; margin-top: 24px; color: var(--t0); letter-spacing: -0.01em }
+/* Com o mockup ao lado, a coluna de texto perde ~40% da largura: um tamanho
+   fixo de 72px quebrava a frase em quatro linhas. O clamp acompanha a largura
+   da tela e dispensa um override por breakpoint. */
+.ld-hero-title { font-family: var(--font-serif); font-size: clamp(40px, 4.4vw, 64px); line-height: 1.05; margin-top: 24px; color: var(--t0); letter-spacing: -0.01em }
 .ld-hero-sub { font-size: 18px; color: var(--t2); margin-top: 24px; max-width: 640px; line-height: 1.625 }
 .ld-accent { font-style: italic; color: var(--gold) }
 .ld-trust { display: flex; gap: 24px; margin-top: 32px; font-size: 12px; color: var(--t2) }
 .ld-trust span { display: flex; align-items: center; gap: 6px }
-.ld-preview { margin-top: 64px; border-radius: 12px; border: 1px solid var(--bd); background: var(--bg1); box-shadow: 0 30px 60px -30px rgba(12,26,50,.2); overflow: hidden }
-.ld-preview-bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--bd); background: color-mix(in oklch, var(--bg2) 40%, transparent) }
+/* Hero em duas colunas: o texto vende, o mockup mostra. Abaixo de 1080px o
+   mockup vai para baixo do texto — lado a lado ele ficaria estreito demais
+   para os gráficos serem lidos. */
+.ld-hero { padding-top: 80px; padding-bottom: 96px; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 56px; align-items: center }
+.ld-hero-copy { min-width: 0 }
+.ld-hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px }
+
+.ld-preview { border-radius: 12px; border: 1px solid var(--bd); background: var(--bg1); box-shadow: 0 30px 60px -30px rgba(12,26,50,.28); overflow: hidden }
+.ld-preview-bar { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-bottom: 1px solid var(--bd); background: color-mix(in oklch, var(--bg2) 40%, transparent) }
+.ld-preview-url { margin-left: 8px; font-family: ui-monospace, monospace; font-size: 11px; color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+
+.ld-mock { padding: 18px }
+.ld-mock-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px }
+.ld-mock-eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--t2) }
+.ld-mock-title { font-family: var(--font-serif); font-size: 22px; line-height: 1.2; color: var(--t0) }
+.ld-mock-chip { flex-shrink: 0; font-size: 11px; color: var(--t2); border: 1px solid var(--bd); border-radius: 999px; padding: 3px 10px }
+
+.ld-mock-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px }
+.ld-mock-kpi { border: 1px solid var(--bd); border-radius: 8px; padding: 10px 12px; background: var(--bg0) }
+.ld-mock-kpi-l { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--t2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.ld-mock-kpi-v { font-family: var(--font-serif); font-size: 26px; line-height: 1.2; color: var(--t0); margin-top: 4px }
+.ld-mock-kpi-s { font-size: 10px; margin-top: 4px }
+
+.ld-mock-charts { display: grid; grid-template-columns: 1.35fr 1fr; gap: 10px }
+.ld-mock-card { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; background: var(--bg0); min-width: 0 }
+.ld-mock-card-t { font-size: 11px; font-weight: 500; color: var(--t1); margin-bottom: 10px }
+.ld-mock-svg { display: block; width: 100%; height: 68px }
+
+.ld-mock-bars { display: flex; align-items: flex-end; gap: 6px; height: 68px }
+.ld-mock-bars span { flex: 1; background: var(--ch-blue); border-radius: 3px 3px 0 0; min-width: 0 }
+
+.ld-mock-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 10px; color: var(--t2) }
+.ld-mock-legend span { display: inline-flex; align-items: center; gap: 5px }
+.ld-mock-legend i { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0 }
+
+.ld-mock-foot { display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--gold-dim); font-size: 11px; line-height: 1.5; color: var(--t1) }
+.ld-mock-foot i { color: var(--gold); flex-shrink: 0; margin-top: 1px }
 .ld-dot { width: 10px; height: 10px; border-radius: 999px }
-.ld-preview-grid { display: grid; grid-template-columns: repeat(3, 1fr) }
-.ld-preview-cell { padding: 24px; border-right: 1px solid var(--bd) }
-.ld-preview-cell:last-child { border-right: none }
 .ld-section-alt { border-top: 1px solid var(--bd); background: color-mix(in oklch, var(--bg2) 30%, var(--bg0)) }
 .ld-section-label { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--t2) }
 .ld-section-title { font-family: var(--font-serif); font-size: 48px; line-height: 1.1; margin-top: 12px; letter-spacing: -0.01em }
@@ -569,25 +627,41 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
 .ld-plan-hl { border-color: var(--gold); box-shadow: 0 20px 50px -25px rgba(198,165,107,.4) }
 .ld-plan-feats { list-style: none; margin-top: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; flex: 1 }
 .ld-plan-feats li { display: flex; align-items: flex-start; gap: 8px }
+/* ── Contato ── */
+.ld-contato { padding-top: 80px; padding-bottom: 80px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 56px; align-items: start }
+.ld-contato-sub { font-size: 16px; color: var(--t2); line-height: 1.7; margin-top: 20px; max-width: 460px }
+.ld-canais { list-style: none; margin-top: 36px; display: flex; flex-direction: column; gap: 18px }
+.ld-canais li { display: flex; align-items: center; gap: 14px }
+.ld-canais i { font-size: 20px; color: var(--gold); flex-shrink: 0 }
+.ld-canal-l { font-size: 12px; color: var(--t2) }
+.ld-canal-v { font-size: 15px; color: var(--t0); text-decoration: none; font-weight: 500 }
+.ld-canal-v:hover { color: var(--blue-text); text-decoration: underline }
+
+.ld-form-card { background: var(--bg1); border: 1px solid var(--bd); border-radius: var(--rl); padding: 28px; box-shadow: 0 20px 50px -30px rgba(12,26,50,.25) }
+.ld-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px }
+.ld-form-row:first-child { margin-top: 0 }
+.ld-textarea { resize: vertical; min-height: 120px; line-height: 1.6; font-family: inherit }
+.ld-opt { text-transform: none; letter-spacing: normal; color: var(--t3); font-weight: 400 }
+.ld-form-err { font-size: 12px; color: var(--red-t); margin-top: 6px }
+/* Isca anti-robô: fora da tela, sem display:none — alguns robôs pulam campos
+   escondidos por display, mas preenchem os que ainda estão no layout. */
+.ld-hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0 }
+
+.ld-form-ok { text-align: center; padding: 24px 8px }
+.ld-form-ok i { font-size: 40px; color: var(--green-t) }
+.ld-form-ok h3 { font-family: var(--font-serif); font-size: 24px; color: var(--t0); margin: 12px 0 8px; font-weight: 400 }
+.ld-form-ok p { font-size: 14px; color: var(--t2); line-height: 1.6 }
+
 .ld-footer { border-top: 1px solid var(--bd) }
 .ld-footer-inner { padding-top: 40px; padding-bottom: 40px; display: flex; align-items: center; justify-content: space-between }
 
-@media (max-width: 768px) {
-  .ld-nav { display: none }
-  .ld-hero-title { font-size: 48px }
-  .ld-hero-sub { font-size: 16px }
-  .ld-preview-grid { grid-template-columns: 1fr }
-  .ld-preview-cell { border-right: none; border-bottom: 1px solid var(--bd) }
-  .ld-preview-cell:last-child { border-bottom: none }
-  .ld-section-title { font-size: 36px }
-  .ld-steps { grid-template-columns: 1fr }
-  .ld-step { border-right: none; border-bottom: 1px solid var(--bd) }
-  .ld-step:last-child { border-bottom: none }
-  .ld-two-col { grid-template-columns: 1fr; gap: 32px }
-  .ld-plans { grid-template-columns: 1fr }
-  .ld-footer-inner { flex-direction: column; gap: 16px; text-align: center }
-  .ld-trust { flex-direction: column; gap: 8px }
-}
+
+/* Menu de ações da análise */
+.an-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 14px; background: none; border: none; text-align: left; font-size: 14px; color: var(--t0); cursor: pointer }
+.an-menu-item:hover { background: var(--bg2) }
+.an-menu-item i { font-size: 16px; color: var(--t2) }
+.an-menu-item-danger { color: var(--red-t); border-top: 1px solid var(--bd) }
+.an-menu-item-danger i { color: var(--red-t) }
 
 /* ── Bottom nav (mobile/tablet) ── */
 .bottom-nav { display: none }
@@ -671,7 +745,50 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: url("
   .pilar-body .ind-cell:nth-child(2n) { border-right: none }
 }
 
+/* Lado a lado o mockup fica estreito demais para os gráficos serem lidos —
+   abaixo disso ele vai para baixo do texto. */
+@media (max-width: 1080px) {
+  .ld-hero { grid-template-columns: 1fr; gap: 48px; padding-top: 56px; padding-bottom: 72px }
+  .ld-preview { max-width: 720px }
+}
+
 /* ── Small phone breakpoint ── */
+/* Landing — este bloco precisa vir DEPOIS do de 1024px: media queries de
+   mesma especificidade são resolvidas por ordem, e com ele antes o
+   `.ld-plans { 1fr 1fr 1fr }` do tablet sobrescrevia o `1fr` do mobile,
+   deixando os planos em 3 colunas no celular. */
+@media (max-width: 768px) {
+  .ld-nav { display: none }
+  .ld-hero-sub { font-size: 16px }
+  .ld-section-title { font-size: 36px }
+  .ld-contato { grid-template-columns: 1fr; gap: 40px; padding-top: 56px; padding-bottom: 56px }
+  .ld-form-card { padding: 20px }
+  .ld-form-row { grid-template-columns: 1fr }
+  .ld-steps { grid-template-columns: 1fr }
+  .ld-step { border-right: none; border-bottom: 1px solid var(--bd) }
+  .ld-step:last-child { border-bottom: none }
+  .ld-two-col { grid-template-columns: 1fr; gap: 32px }
+  .ld-plans { grid-template-columns: 1fr }
+  .ld-footer-inner { flex-direction: column; gap: 16px; text-align: center }
+  .ld-trust { flex-direction: column; gap: 8px }
+}
+
+/* No celular o mockup não tem largura para três cartões lado a lado: eles
+   viram linhas (rótulo à esquerda, valor à direita), o que mantém a altura
+   sob controle sem cortar texto. */
+@media (max-width: 560px) {
+  .ld-mock-kpis { grid-template-columns: 1fr; gap: 8px }
+  .ld-mock-kpi { display: flex; align-items: baseline; justify-content: space-between; gap: 10px }
+  .ld-mock-kpi-l { white-space: normal }
+  .ld-mock-kpi-v { font-size: 20px; margin-top: 0; margin-left: auto }
+  .ld-mock-kpi-s { margin-top: 0 }
+  .ld-mock-charts { grid-template-columns: 1fr }
+  /* O botão do topo quebrava em duas linhas e empurrava o "Entrar" por cima
+     do logo. */
+  .ld-header-actions .btn { padding: 8px 12px; font-size: 13px; white-space: nowrap }
+  .ld-header-actions { gap: 10px }
+}
+
 @media (max-width: 480px) {
   .ld-container { padding-left: 16px; padding-right: 16px }
   .acct-office-grid { grid-template-columns: 1fr }

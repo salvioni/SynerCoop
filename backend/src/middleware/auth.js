@@ -1,6 +1,7 @@
 import { verifyToken } from '../lib/jwt.js';
 import { db } from '../lib/db.js';
-import { unauthorized, forbidden, paymentRequired } from '../lib/validate.js';
+import { unauthorized, forbidden, paymentRequired, trialExpired } from '../lib/validate.js';
+import { trialExpirado } from '../lib/plans.js';
 
 // Marca uma rota como acessível mesmo com tenants.plan ainda não definido
 // (conta criada mas sem plano escolhido). Deve vir ANTES de authRequired.
@@ -22,7 +23,8 @@ export async function authRequired(req, _res, next) {
       SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.email_verified,
              u.avatar, u.avatar_color, u.token_version,
              t.name AS tenant_name, t.plan, t.active AS tenant_active,
-             t.type AS tenant_type, t.self_client_id, t.logo AS tenant_logo
+             t.type AS tenant_type, t.self_client_id, t.logo AS tenant_logo,
+             t.trial_ends_at
       FROM users u
       LEFT JOIN tenants t ON t.id = u.tenant_id
       WHERE u.id = ?
@@ -50,6 +52,29 @@ export async function authRequired(req, _res, next) {
     }
     next();
   } catch (e) { next(e); }
+}
+
+/**
+ * Teste vencido = conta em somente leitura.
+ *
+ * A pessoa continua entrando, vendo as análises que fez e baixando os
+ * relatórios — apagar o acesso ao próprio trabalho seria hostil e ainda tiraria
+ * o motivo de voltar. O que para é a escrita: nada de nova análise, novo
+ * cliente ou novo convite até assinar.
+ *
+ * Métodos de leitura passam direto. As exceções são as rotas de conta (é por
+ * elas que se assina) e o logout, montadas fora deste middleware.
+ */
+export function trialAtivo(req, _res, next) {
+  if (!req.user) return next(unauthorized());
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  if (trialExpirado({ plan: req.user.plan, trial_ends_at: req.user.trial_ends_at })) {
+    return next(trialExpired(
+      'Seu teste grátis de 7 dias terminou. Suas análises continuam disponíveis para consulta — '
+      + 'escolha um plano para voltar a criar análises, clientes e convites.'
+    ));
+  }
+  next();
 }
 
 export function managerOnly(req, _res, next) {

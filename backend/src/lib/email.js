@@ -11,6 +11,16 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+// Caixa que recebe o formulário de contato do site.
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || 'contato@synercoop.com.br';
+
+// O conteúdo vem de um formulário público: interpolar direto no HTML do e-mail
+// deixaria qualquer visitante injetar marcação na nossa caixa de entrada.
+function escapeHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 function baseHtml(title, body) {
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${title}</title></head>
@@ -81,6 +91,43 @@ export async function sendPasswordResetEmail({ to, link }) {
   }
   console.log(`[email] (dev) reset link para ${to}: ${link}`);
   return { sent: false, devLink: link };
+}
+
+/**
+ * Mensagem do formulário de contato do site.
+ *
+ * Vai para a caixa da própria empresa (CONTACT_EMAIL), com `replyTo` no
+ * e-mail de quem escreveu — assim responder no cliente de e-mail responde à
+ * pessoa, e não a nós mesmos.
+ */
+export async function sendContactEmail({ nome, email, empresa, telefone, mensagem }) {
+  const linha = (rot, val) => val
+    ? `<p style="margin:0 0 8px;color:#3f3f46;font-size:14px"><strong>${rot}:</strong> ${escapeHtml(val)}</p>`
+    : '';
+  const html = baseHtml('Contato pelo site', `
+    <h2 style="margin:0 0 16px;font-size:18px;color:#18181b">Nova mensagem pelo site</h2>
+    ${linha('Nome', nome)}
+    ${linha('E-mail', email)}
+    ${linha('Organização', empresa)}
+    ${linha('Telefone', telefone)}
+    <p style="margin:16px 0 6px;color:#71717a;font-size:12px;text-transform:uppercase;letter-spacing:.05em">Mensagem</p>
+    <p style="margin:0;color:#3f3f46;font-size:14px;line-height:1.6;white-space:pre-wrap">${escapeHtml(mensagem)}</p>
+  `);
+  if (!resend) return { sent: false, error: 'not_configured' };
+  try {
+    const { error } = await resend.emails.send({
+      from: `${APP_NAME} <${EMAIL_FROM}>`,
+      to: CONTACT_EMAIL,
+      replyTo: email,
+      subject: `[Site] ${nome}${empresa ? ` — ${empresa}` : ''}`,
+      html,
+    });
+    if (error) throw new Error(error.message || 'Falha ao enviar e-mail.');
+    return { sent: true };
+  } catch (e) {
+    console.error('[email] erro ao enviar contato:', e.message);
+    return { sent: false, error: e.message };
+  }
 }
 
 export async function sendInviteEmail({ to, name, companyName, link, role }) {

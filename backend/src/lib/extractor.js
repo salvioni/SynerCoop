@@ -26,6 +26,12 @@ REGRAS IMPORTANTES (leia antes de ver a estrutura):
   dívida quando na verdade o dado simplesmente não estava no documento)
 - Cooperativas usam "Sobras/Perdas" em vez de "Lucro/Prejuízo"
 - EBITDA = Resultado Bruto + Despesas Operacionais (sem depreciação e sem resultado financeiro)
+- "inadimplencia_pct": razão entre a PERDA ESTIMADA do contas a receber e o TOTAL a receber,
+  como fração decimal (ex: 0.0804 para 8,04%), sempre POSITIVA. A perda estimada costuma
+  aparecer como "Perdas estimadas em créditos de liquidação duvidosa", "PECLD", "Provisão
+  para devedores duvidosos" ou "PDD" — no balanço é uma conta redutora do contas a receber
+  (valor negativo). Divida o módulo dela pelo contas a receber BRUTO (antes da dedução).
+  Se qualquer um dos dois não estiver no documento, retorne null — não estime.
 - "confidence": sua confiança geral na extração (0.0 a 1.0)
 - "year": o exercício fiscal que o documento representa — o ANO em que o período contábil ENCERROU.
   NÃO o ano em que o documento foi preparado, assinado, aprovado ou impresso.
@@ -95,7 +101,8 @@ encontrado no documento, ou mantenha null se não encontrar:
     "despesas_financeiras": null,
     "resultado_antes_ir": null,
     "ir_csll": null,
-    "sobras_perdas": null
+    "sobras_perdas": null,
+    "inadimplencia_pct": null
   },
   "confidence": 0.9,
   "notes": "observações sobre a extração"
@@ -155,6 +162,15 @@ function extractFromStandardExcel(wb, filename) {
   const caixa = val('A.01', 'G29');
   const contas_rec_cp = val('A.02', 'G33');
   const contas_rec_lp = val('A.02', 'G34');
+  // Inadimplência = perdas estimadas ÷ total do contas a receber (A.02!G31 e
+  // G29). É dado do próprio questionário — o modelo calcula em
+  // INDICADORES!D16 e aqui replicamos pra que cards, gráficos e relatório
+  // mostrem o mesmo número que a planilha.
+  const perdas_estimadas = val('A.02', 'G31');
+  const total_a_receber = val('A.02', 'G29');
+  const inadimplencia_pct = (perdas_estimadas != null && total_a_receber)
+    ? -(perdas_estimadas / total_a_receber)
+    : null;
   const adiantamentos = val('A.03', 'G15');
   const estoques = val('A.04', 'G17');
   const outros_cp = val('A.05', 'G9');
@@ -232,6 +248,7 @@ function extractFromStandardExcel(wb, filename) {
       despesas_operacionais: desp_op, ebitda, depreciacao: neg(depreciacao),
       receitas_financeiras: rec_fin, despesas_financeiras: neg(desp_fin),
       resultado_antes_ir, ir_csll: neg(ir_csll), sobras_perdas: sobras,
+      ...(inadimplencia_pct != null ? { inadimplencia_pct } : {}),
     },
     confidence: 1.0,
     notes: 'Extraído do formato padrão Balanço Perguntado',

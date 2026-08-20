@@ -92,3 +92,50 @@ export function mergePeriod(extractedYear, extractedLabel, filenamePeriod) {
   }
   return { year: extractedYear, period_label: extractedLabel || null };
 }
+
+// Quantos meses o período cobre — usado para anualizar os fluxos da DSP.
+//
+// Indicadores que dividem um saldo do balanço (uma foto, tirada numa data) por
+// um valor da DSP (um filme, acumulado ao longo do período) só fazem sentido se
+// o filme cobrir um ano: é o que as fórmulas do modelo assumem ao multiplicar
+// por 360. Com um mês no denominador, o PMR sai 12× maior. Daqui sai o fator
+// que recoloca o fluxo na escala anual.
+//
+// Retorna 12 quando não há rótulo (exercício anual) ou quando o formato não é
+// reconhecido — na dúvida, não mexe no número.
+export function monthsInPeriod(periodLabel) {
+  if (!periodLabel) return 12;
+  const t = String(periodLabel).toLowerCase();
+  if (/\bbimestre\b/.test(t)) return 2;
+  if (/\btrimestre\b/.test(t)) return 3;
+  if (/\bquadrimestre\b/.test(t)) return 4;
+  if (/\bsemestre\b/.test(t)) return 6;
+  if (/\bexerc[íi]cio\b|\banual\b/.test(t)) return 12;
+  // "Janeiro de 2025" e afins — mês isolado.
+  const meses = ['janeiro','fevereiro','mar','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  if (meses.some(m => t.includes(m))) return 1;
+  return 12;
+}
+
+// Nome do tipo de período, para mensagens ao usuário. Guarda o plural porque
+// o português não o forma por sufixo simples aqui ("anual" → "anuais").
+const NOME_PERIODO = {
+  1:  { sing: 'mensal',         plur: 'mensais' },
+  2:  { sing: 'bimestral',      plur: 'bimestrais' },
+  3:  { sing: 'trimestral',     plur: 'trimestrais' },
+  4:  { sing: 'quadrimestral',  plur: 'quadrimestrais' },
+  6:  { sing: 'semestral',      plur: 'semestrais' },
+  12: { sing: 'anual',          plur: 'anuais' },
+};
+
+export function periodKindLabel(periodLabel, plural = false) {
+  const n = NOME_PERIODO[monthsInPeriod(periodLabel)] || NOME_PERIODO[12];
+  return plural ? n.plur : n.sing;
+}
+
+// Dois períodos são do mesmo tipo quando cobrem a mesma quantidade de meses.
+// "Janeiro de 2025" e "Março de 2025" são compatíveis; "Janeiro de 2025" e
+// "Exercício 2025" não são.
+export function samePeriodKind(a, b) {
+  return monthsInPeriod(a) === monthsInPeriod(b);
+}

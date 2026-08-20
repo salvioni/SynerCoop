@@ -1,17 +1,24 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 import FilterSelect from '../components/FilterSelect.jsx';
 import UserAvatar from '../components/UserAvatar.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import ConfirmModal from '../components/ConfirmModal.jsx';
 import { periodShort } from '../lib/period.js';
 import { SIGNING_ENABLED } from '../lib/constants.js';
+import { useNewAnalysis } from '../lib/newAnalysis.jsx';
 
 const STATUS_LABELS = { editable: 'Editável', signed: 'Assinada' };
 
 export default function AnalysesList() {
+  const novaAnalise = useNewAnalysis();
   const navigate = useNavigate();
+  // Contas de entidade única não têm carteira: a coluna "Cliente" repetiria o
+  // nome da própria conta em todas as linhas, então ela some e a busca passa
+  // a filtrar por período.
+  const { isSingleEntity } = useAuth();
   const [analyses, setAnalyses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -40,8 +47,10 @@ export default function AnalysesList() {
     return [key, { key, label: key, year: a.year }];
   })).values()].sort((a, b) => b.year - a.year || a.label.localeCompare(b.label, 'pt-BR'));
 
+
   const filtered = analyses.filter(a => {
-    if (search && !(a.client_name || '').toLowerCase().includes(search.toLowerCase())) return false;
+    const haystack = isSingleEntity ? periodShort(a) : (a.client_name || '');
+    if (search && !haystack.toLowerCase().includes(search.toLowerCase())) return false;
     if (SIGNING_ENABLED && statusFilter && a.status !== statusFilter) return false;
     if (periodFilter && (a.period_label || String(a.year)) !== periodFilter) return false;
     return true;
@@ -53,13 +62,13 @@ export default function AnalysesList() {
       <PageHeader
         subtitle="Histórico"
         title="Análises"
-        action={<button className="btn btn-p" onClick={() => navigate('/app/analyses/new')}><i className="ti ti-plus"></i> Nova análise</button>}
+        action={<button className="btn btn-p" onClick={novaAnalise}><i className="ti ti-plus"></i> Nova análise</button>}
       />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
         <div className="cl-search" style={{ flex: 1, minWidth: 200 }}>
           <i className="ti ti-search"></i>
-          <input className="inp" placeholder="Buscar por cliente..."
+          <input className="inp" placeholder={isSingleEntity ? "Buscar por período..." : "Buscar por cliente..."}
             value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         {SIGNING_ENABLED && (
@@ -105,7 +114,7 @@ export default function AnalysesList() {
             <table className="adm-table" style={{ minWidth: 480 }}>
               <thead>
                 <tr>
-                  <th>Cliente</th>
+                  {!isSingleEntity && <th>Cliente</th>}
                   <th>Exercício</th>
                   <th className="al-col-user">Criada por</th>
                   <th>Data</th>
@@ -116,12 +125,14 @@ export default function AnalysesList() {
               <tbody>
                 {filtered.map(a => (
                   <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/app/analyses/${a.id}`)}>
-                    <td>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        {a.client_name || 'Cliente'}
-                        {!a.client_active && <span className="pill pill-y">Arquivado</span>}
-                      </span>
-                    </td>
+                    {!isSingleEntity && (
+                      <td>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          {a.client_name || 'Cliente'}
+                          {!a.client_active && <span className="pill pill-y">Arquivado</span>}
+                        </span>
+                      </td>
+                    )}
                     <td>{periodShort(a)}</td>
                     <td className="al-col-user">
                       {a.user_name ? (
@@ -167,14 +178,18 @@ export default function AnalysesList() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                     <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {a.client_name || 'Cliente'}
+                      {isSingleEntity ? periodShort(a) : (a.client_name || 'Cliente')}
                     </span>
-                    {!a.client_active && <span className="pill pill-y" style={{ flexShrink: 0 }}>Arquivado</span>}
+                    {!isSingleEntity && !a.client_active && <span className="pill pill-y" style={{ flexShrink: 0 }}>Arquivado</span>}
                     {SIGNING_ENABLED && <span className={`pill ${a.status === 'signed' ? 'pill-g' : 'pill-b'}`} style={{ flexShrink: 0 }}>{STATUS_LABELS[a.status] || a.status}</span>}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t2)' }}>
-                    <span style={{ color: 'var(--t0)', fontWeight: 500 }}>{periodShort(a)}</span>
-                    <span style={{ color: 'var(--t3)' }}>·</span>
+                    {!isSingleEntity && (
+                      <>
+                        <span style={{ color: 'var(--t0)', fontWeight: 500 }}>{periodShort(a)}</span>
+                        <span style={{ color: 'var(--t3)' }}>·</span>
+                      </>
+                    )}
                     <span>{new Date(a.created_at).toLocaleDateString('pt-BR')}</span>
                     {a.user_name && (
                       <>

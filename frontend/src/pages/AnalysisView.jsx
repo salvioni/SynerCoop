@@ -2,9 +2,12 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile } from '../lib/api.js';
 import { useBackNavigate } from '../lib/useBackNavigate.js';
+import { useAuth } from '../lib/auth.jsx';
+import { useAccountInfo } from '../lib/accountInfo.jsx';
 import ConfirmModal from '../components/ConfirmModal.jsx';
 import InfoTooltip from '../components/InfoTooltip.jsx';
 import { periodLabel, periodShort, periodSlug } from '../lib/period.js';
+import { INDICATOR_HELP, PILAR_HELP } from '../lib/indicatorHelp.js';
 import { SIGNING_ENABLED } from '../lib/constants.js';
 
 function AutoTextarea({ value, onChange, placeholder }) {
@@ -31,6 +34,7 @@ const PILARES = [
     { k: 'liquidez_seca', label: 'Liquidez Seca', fn: num },
     { k: 'imobilizacao_recursos_proprios', label: 'Imob. Rec. Próprios', fn: pct },
     { k: 'ebitda', label: 'EBITDA', fn: brl },
+    { k: 'inadimplencia_total_pct', label: 'Inadimplência s/ Créditos', fn: pct },
   ]},
   { key: 'rentabilidade', label: 'Rentabilidade', icon: 'ti-coin', items: [
     { k: 'rentabilidade_pl_pct', label: 'ROE', fn: pct },
@@ -57,6 +61,50 @@ const PILARES = [
   ]},
 ];
 
+// Para cada indicador, se subir é bom ou ruim. Sem isso a variação viraria
+// apenas "mudou", e pintar de verde um endividamento que cresceu seria pior do
+// que não mostrar nada. null = neutro (só informa a variação, sem julgar).
+const BETTER_WHEN = {
+  liquidez_corrente: 'up', liquidez_geral: 'up', liquidez_seca: 'up',
+  garantia_capital_terceiros: 'up', imobilizacao_recursos_proprios: 'down',
+  ebitda: 'up', inadimplencia_total_pct: 'down',
+  rentabilidade_pl_pct: 'up', rentabilidade_ativos_pct: 'up',
+  rentabilidade_ingressos_pct: 'up', rentabilidade_capital_integralizado_pct: 'up',
+  endividamento_total_pct: 'down', perfil_endividamento_pct: 'down',
+  nivel_alavancagem_ebitda: 'down', endividamento_operacional_pct: 'down',
+  endividamento_financeiro_total_pct: 'down', endividamento_financeiro_lp_pct: 'down',
+  endividamento_lp_pct: null,
+  pmr: 'down', pme: 'down', pmp: 'up', ciclo_operacional: 'down',
+  ciclo_financeiro: 'down', giro_ativo: 'up', giro_permanente: 'up',
+  capital_giro: 'up', ncg: 'down', tesouraria: 'up',
+  independencia_financeira: 'up', indice_autofinanciamento: 'up',
+};
+
+// Variação vs. o período anterior. Mostra a diferença em pontos percentuais
+// quando o indicador já é um percentual, e variação relativa nos demais —
+// "de 1,20 para 1,32" é mais legível como +10% do que como +0,12.
+function Delta({ k, atual, anterior, periodo }) {
+  if (atual == null || anterior == null || anterior === 0) return null;
+  const isPct = k.endsWith('_pct');
+  const diff = atual - anterior;
+  if (Math.abs(diff) < 1e-9) {
+    return <span style={{ fontSize: 11, color: 'var(--t3)' }}>sem variação vs {periodo}</span>;
+  }
+  const up = diff > 0;
+  const dir = BETTER_WHEN[k];
+  const color = dir == null ? 'var(--t2)'
+    : (up === (dir === 'up')) ? 'var(--green-t)' : 'var(--red-t)';
+  const texto = isPct
+    ? `${up ? '+' : '−'}${Math.abs(diff * 100).toFixed(1)} p.p.`
+    : `${up ? '+' : '−'}${Math.abs((diff / Math.abs(anterior)) * 100).toFixed(1)}%`;
+  return (
+    <span style={{ fontSize: 11, color, whiteSpace: 'nowrap' }} title={`Período anterior: ${periodo}`}>
+      <i className={`ti ti-arrow-${up ? 'up' : 'down'}-right`} style={{ fontSize: 12, verticalAlign: 'middle' }} />
+      {' '}{texto} <span style={{ color: 'var(--t3)' }}>vs {periodo}</span>
+    </span>
+  );
+}
+
 const SCORECARD = [
   { key: 'liquidez', label: 'Liquidez', icon: 'ti-droplet' },
   { key: 'endividamento', label: 'Endividamento', icon: 'ti-trending-up' },
@@ -66,29 +114,6 @@ const SCORECARD = [
 ];
 
 // ── Textos de tooltip para indicadores, BP e DSP ────────────────────────────
-const INDICATOR_TOOLTIP = {
-  liquidez_corrente: 'Mostra quantos reais a cooperativa tem disponível para cada R$1 de dívida de curto prazo. Benchmark saudável: acima de 1,20.',
-  liquidez_geral: 'Relaciona todos os ativos com todas as obrigações. Acima de 1,00 indica que a cooperativa pode honrar todas as dívidas.',
-  liquidez_seca: 'Igual à Liquidez Corrente, mas exclui estoques — mede a capacidade de pagar dívidas sem depender de vendas. Benchmark: ≥ 1,00.',
-  imobilizacao_recursos_proprios: 'Percentual do Patrimônio Líquido investido em bens fixos. Acima de 80% indica dependência de capital de terceiros.',
-  ebitda: 'Resultado operacional antes de juros, impostos e depreciação — proxy da geração de caixa da operação. Quanto maior, melhor.',
-  rentabilidade_pl_pct: 'Retorno sobre o Patrimônio Líquido (ROE). Indica quanto a cooperativa gerou para cada real investido pelos sócios. Benchmark: ≥ Selic.',
-  rentabilidade_ativos_pct: 'Retorno sobre os Ativos (ROA). Mede a eficiência na geração de resultado em relação ao total investido. Benchmark: > 5%.',
-  rentabilidade_ingressos_pct: 'Margem Líquida — percentual que sobra de cada real de receita após todos os custos. Benchmark: > 5%.',
-  endividamento_total_pct: 'Percentual dos ativos financiados por terceiros. Abaixo de 50% indica estrutura financeira saudável.',
-  perfil_endividamento_pct: 'Proporção da dívida total que vence no curto prazo. Quanto menor, menor a pressão imediata sobre o caixa. Benchmark: < 50%.',
-  nivel_alavancagem_ebitda: 'Anos necessários para pagar toda a dívida com o EBITDA atual. Abaixo de 3× é considerado saudável.',
-  pmr: 'Prazo Médio de Recebimento — quantos dias a cooperativa leva para receber suas vendas. Benchmark: < 90 dias.',
-  pme: 'Prazo Médio de Estoques — quantos dias o estoque fica parado antes de ser vendido. Benchmark: < 60 dias.',
-  pmp: 'Prazo Médio de Pagamento — quantos dias a cooperativa tem para pagar seus fornecedores. Quanto maior, melhor para o caixa. Benchmark: > 30 dias.',
-  ciclo_financeiro: 'Tempo que a cooperativa precisa financiar sua operação com capital próprio ou de terceiros. Benchmark: < 60 dias.',
-  giro_ativo: 'Eficiência dos ativos na geração de receita — quanto de receita é gerado para cada real de ativo. Benchmark: > 0,5.',
-  capital_giro: 'Diferença entre Ativo Circulante e Passivo Circulante. Positivo indica que a cooperativa financia parte do giro com recursos próprios.',
-  ncg: 'Necessidade de Capital de Giro — quanto de capital a operação precisa para funcionar. Negativo indica que a operação se autofinancia.',
-  tesouraria: 'Diferença entre Capital de Giro e NCG. Positivo indica fôlego financeiro; negativo indica dependência de financiamento de curto prazo.',
-  independencia_financeira: 'Percentual dos ativos financiados pelo Patrimônio Líquido. Acima de 0,5 indica boa independência financeira.',
-};
-
 const BP_TOOLTIP = {
   ativo_circulante: 'Bens e direitos conversíveis em caixa em até 12 meses: disponibilidades, recebíveis, estoques, etc.',
   disponibilidades: 'Caixa, bancos e aplicações de liquidez imediata.',
@@ -120,10 +145,61 @@ function scoreGrade(key, ind) {
   return (r[key] || (() => null))();
 }
 
+// Espelha normalizeRecomendacao do backend (lib/narrative.js). A IA às vezes
+// devolve a recomendação como objeto em vez de string; narrativas salvas antes
+// da normalização no servidor ainda têm esse formato no banco, e sem isto a
+// tela quebra inteira num `rec.indexOf is not a function`.
+function recToText(rec) {
+  if (typeof rec === 'string') return rec;
+  if (rec && typeof rec === 'object') {
+    const titulo = rec.titulo ?? rec.title ?? rec.acao ?? rec.nome ?? '';
+    const desc   = rec.descricao ?? rec.description ?? rec.detalhe ?? rec.texto ?? rec.acao_necessaria ?? '';
+    if (titulo && desc) return `${titulo}: ${desc}`;
+    const unico = titulo || desc;
+    if (unico) return String(unico);
+    return Object.values(rec).filter(v => typeof v === 'string').join(': ') || JSON.stringify(rec);
+  }
+  return String(rec ?? '');
+}
+
 function indColor(pk, k, v) {
   if (v == null) return '';
   const r = { liquidez: () => ['liquidez_corrente','liquidez_geral','liquidez_seca'].includes(k) ? (v >= 1 ? 'green' : v >= 0.7 ? 'yellow' : 'red') : (v > 0 ? 'green' : 'red'), rentabilidade: () => v >= 0.1 ? 'green' : v >= 0.03 ? 'yellow' : 'red', endividamento: () => k === 'nivel_alavancagem_ebitda' ? (v <= 2 ? 'green' : v <= 4 ? 'yellow' : 'red') : (v <= 0.4 ? 'green' : v <= 0.6 ? 'yellow' : 'red'), capacidade_operacional: () => k === 'pmp' ? (v >= 30 ? 'green' : 'yellow') : (['pme','pmr','ciclo_financeiro','ciclo_operacional'].includes(k) ? (v <= 60 ? 'green' : v <= 120 ? 'yellow' : 'red') : (v >= 1 ? 'green' : 'yellow')), tesouraria: () => k === 'independencia_financeira' ? (v >= 0.5 ? 'green' : v >= 0.3 ? 'yellow' : 'red') : (v > 0 ? 'green' : v > -50000 ? 'yellow' : 'red') };
   return (r[pk] || (() => ''))();
+}
+
+// Percorre todos os pilares e devolve os indicadores em estado crítico e a
+// contagem dos que não puderam ser calculados. Serve para responder, logo no
+// topo, "onde está o problema?" e "dá pra confiar nestes números?" — hoje as
+// duas respostas exigiam varrer a página inteira.
+// Indicadores cujo valor foi levado à base anual quando o período é menor que
+// o ano (ver calculator.js). São os que dividem um saldo do balanço por um
+// valor da DSP — o número exibido é o ritmo do período projetado para 12 meses,
+// não o realizado. Marcá-los evita que alguém leia "ROE 33%" de um mês como
+// resultado apurado.
+const ANUALIZADOS = new Set([
+  'nivel_alavancagem_ebitda', 'rentabilidade_capital_integralizado_pct',
+  'rentabilidade_pl_pct', 'rentabilidade_ativos_pct',
+  'pme', 'pmr', 'pmp', 'ciclo_operacional', 'ciclo_financeiro',
+  'giro_ativo', 'giro_permanente',
+  'capital_giro_faturamento_pct', 'ncg_faturamento_pct', 'tesouraria_faturamento_pct',
+]);
+
+function auditIndicadores(indicators, pilares) {
+  const criticos = [];
+  let semDados = 0, total = 0;
+  for (const pilar of pilares) {
+    const data = indicators?.[pilar.key] || {};
+    for (const item of pilar.items) {
+      total++;
+      const v = data[item.k];
+      if (v == null) { semDados++; continue; }
+      if (indColor(pilar.key, item.k, v) === 'red') {
+        criticos.push({ ...item, pilarKey: pilar.key, valor: v });
+      }
+    }
+  }
+  return { criticos, semDados, total };
 }
 
 const GC = { green: { bg: 'rgba(20,135,78,.08)', bd: 'rgba(20,135,78,.2)', t: 'var(--green-t)' }, yellow: { bg: 'rgba(235,136,31,.08)', bd: 'rgba(235,136,31,.2)', t: 'var(--yellow-t)' }, red: { bg: 'rgba(208,29,33,.08)', bd: 'rgba(208,29,33,.2)', t: 'var(--red-t)' }, '': { bg: 'var(--bg2)', bd: 'var(--bd)', t: 'var(--t3)' } };
@@ -166,6 +242,14 @@ export default function AnalysisView() {
   const [saving, setSaving] = useState(false);
   const [signing, setSigning] = useState(false);
   const [actionErr, setActionErr] = useState('');
+  // Análise imediatamente anterior do mesmo cliente — usada para mostrar a
+  // variação de cada indicador. Um retrato isolado não responde "melhorou ou
+  // piorou?", que é a primeira pergunta de quem lê o resultado.
+  const [prev, setPrev] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const { isSingleEntity } = useAuth();
+  const { accountInfo } = useAccountInfo();
   const goBack = useBackNavigate(analysis ? `/app/clients/${analysis.client_id}` : '/app/clients');
 
   useEffect(() => {
@@ -174,6 +258,37 @@ export default function AnalysisView() {
       .catch(() => navigate('/app/clients', { replace: true }))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Fecha o menu de ações ao clicar fora ou apertar Esc — sem isso ele fica
+  // aberto atrás de qualquer outra interação da página.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    const onKey = e => { if (e.key === 'Escape') setMenuOpen(false); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!analysis?.client_id) { setPrev(null); return; }
+    let cancelled = false;
+    api.get(`/analyses?clientId=${analysis.client_id}&limit=50`)
+      .then(r => {
+        // "Anterior" = a mais recente entre as que vêm antes desta na linha do
+        // tempo (ano e, no mesmo ano, data de criação).
+        const isBefore = a => a.year < analysis.year
+          || (a.year === analysis.year && new Date(a.created_at) < new Date(analysis.created_at));
+        const older = (r.analyses || [])
+          .filter(a => a.id !== analysis.id && isBefore(a))
+          .sort((a, b) => b.year - a.year || new Date(b.created_at) - new Date(a.created_at))[0];
+        if (!older || cancelled) return null;
+        return api.get(`/analyses/${older.id}`);
+      })
+      .then(d => { if (d && !cancelled) setPrev(d.analysis); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [analysis?.id, analysis?.client_id]);
 
   async function generateNarrativeAI() {
     setGenNarrative(true); setReportErr('');
@@ -241,6 +356,10 @@ export default function AnalysisView() {
   if (loading || !analysis) return null;
 
   const { bp = {}, dsp = {}, indicators = {} } = analysis;
+  // Em conta de entidade única o "cliente" é a própria conta. O client_name foi
+  // gravado junto da análise e não acompanha uma renomeação feita em Ajustes —
+  // o accountInfo é a fonte viva do nome da empresa.
+  const displayName = (isSingleEntity && accountInfo?.companyName) || analysis.client_name;
   const sobras = dsp?.sobras_perdas;
   const totalAtivo = bp.total_ativo || 1;
   const ebitda = indicators?.liquidez?.ebitda;
@@ -256,8 +375,11 @@ export default function AnalysisView() {
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
-          <p style={{ fontSize: 14, color: 'var(--t2)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>{analysis.client_name} · {periodLabel(analysis)}</span>
+          {/* O título identifica ESTE documento (que período, de quem); o
+              subtítulo diz que tipo de documento é. O contrário deixava todas
+              as análises com o mesmo título e a identidade em letra miúda. */}
+          <p style={{ fontSize: 14, color: 'var(--t2)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span>Análise financeira</span>
             {!analysis.client_active && <span className="pill pill-y">Arquivado</span>}
             {SIGNING_ENABLED && (
               <span className={`pill ${analysis.status === 'signed' ? 'pill-g' : 'pill-b'}`}>
@@ -265,7 +387,9 @@ export default function AnalysisView() {
               </span>
             )}
           </p>
-          <h1 className="page-h1">Análise Financeira</h1>
+          <h1 className="page-h1">
+            {periodShort(analysis)} <span style={{ color: 'var(--t3)', fontWeight: 400 }}>•</span> {displayName}
+          </h1>
         </div>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
           {SIGNING_ENABLED && (analysis.status === 'signed' ? (
@@ -283,17 +407,38 @@ export default function AnalysisView() {
           <button className="btn btn-p" onClick={downloadReport} disabled={reporting}>
             {reporting ? <><i className="ti ti-loader"></i> Gerando…</> : <><i className="ti ti-file-download"></i> Baixar Relatório</>}
           </button>
-          <button className="btn" onClick={() => {
-            const url = window.location.href;
-            const text = `Análise financeira - ${analysis.client_name} (${periodShort(analysis)})`;
-            if (navigator.share) { navigator.share({ title: text, url }); }
-            else { navigator.clipboard.writeText(url).then(() => alert('Link copiado!')); }
-          }}>
-            <i className="ti ti-share"></i> Compartilhar
-          </button>
-          <button className="btn" onClick={() => setConfirm({ title: 'Excluir análise?', message: `Análise de ${periodShort(analysis)} será excluída.`, confirmLabel: 'Excluir', danger: true, onConfirm: doDelete })}>
-            <i className="ti ti-trash"></i>
-          </button>
+          {/* Ações secundárias saem da fileira principal: "Excluir" encostado
+              em "Baixar Relatório" é vizinhança perigosa — um clique errado é
+              irreversível. */}
+          <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+            <button className="btn" aria-label="Mais ações" aria-haspopup="menu" aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(o => !o)}>
+              <i className="ti ti-dots"></i>
+            </button>
+            {menuOpen && (
+              <div role="menu" style={{
+                position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50,
+                background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 10,
+                boxShadow: '0 12px 32px rgba(0,0,0,.14)', minWidth: 210, overflow: 'hidden',
+              }}>
+                <button role="menuitem" className="an-menu-item" onClick={() => {
+                  setMenuOpen(false);
+                  const url = window.location.href;
+                  const text = `Análise financeira - ${displayName} (${periodShort(analysis)})`;
+                  if (navigator.share) { navigator.share({ title: text, url }); }
+                  else { navigator.clipboard.writeText(url).then(() => alert('Link copiado!')); }
+                }}>
+                  <i className="ti ti-share"></i> Compartilhar
+                </button>
+                <button role="menuitem" className="an-menu-item an-menu-item-danger" onClick={() => {
+                  setMenuOpen(false);
+                  setConfirm({ title: 'Excluir análise?', message: `Análise de ${periodShort(analysis)} será excluída.`, confirmLabel: 'Excluir', danger: true, onConfirm: doDelete });
+                }}>
+                  <i className="ti ti-trash"></i> Excluir análise
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -357,9 +502,13 @@ export default function AnalysisView() {
         const statusLabel = (color) => ({ green: 'Bom', yellow: 'Atenção', red: 'Crítico', '': 'Sem dados' }[color] || 'Sem dados');
         const statusDot = (color) => ({ green: 'var(--green-t)', yellow: 'var(--yellow-t)', red: 'var(--red-t)', '': 'var(--t3)' }[color] || 'var(--t3)');
 
-        const splitBullets = (text) => {
+        const splitBullets = (raw) => {
+          // A IA pode devolver lista ou objeto onde o prompt pediu um
+          // parágrafo — coage antes de usar .split().
+          const text = Array.isArray(raw) ? raw.map(recToText).join(' ')
+            : (raw && typeof raw === 'object') ? recToText(raw) : raw;
           if (!text) return [];
-          return text.split(/\.\s+|\n/).map(s => s.trim()).filter(s => s.length > 0).map(s => s.endsWith('.') ? s : s + '.');
+          return String(text).split(/\.\s+|\n/).map(s => s.trim()).filter(s => s.length > 0).map(s => s.endsWith('.') ? s : s + '.');
         };
 
         const lcVal = indicators?.liquidez?.liquidez_corrente;
@@ -372,20 +521,134 @@ export default function AnalysisView() {
         const thirdKey = cfVal != null ? 'ciclo_financeiro' : 'pmr';
         const thirdLabel = cfVal != null ? 'Ciclo Financeiro' : 'PMR';
         const thirdFormatted = cfVal != null ? days(cfVal) : days(pmrVal);
+        const thirdHelp = cfVal != null ? INDICATOR_HELP.ciclo_financeiro : INDICATOR_HELP.pmr;
         const thirdColor = indColor('capacidade_operacional', thirdKey, thirdVal);
 
+        const audit = auditIndicadores(indicators, PILARES);
+        // Confiança vem do extractor: 1.0 no caminho do modelo padrão (leitura
+        // direta de células) e o valor estimado pela IA nos demais. Abaixo de
+        // 0.9 vale avisar — os números são editáveis, mas ninguém corrige o
+        // que não sabe que está torto.
+        const conf = analysis.confidence;
+        const confBaixa = conf != null && conf < 0.9;
+
         return <>
+        {/* ── Qualidade da extração ── */}
+        {/* Linha de texto, sem cartão: é um dado de rodapé sobre a extração,
+            não um alerta. Emoldurar dava a ele mais peso visual que os próprios
+            indicadores logo abaixo. */}
+        {(conf != null || audit.semDados > 0 || analysis.notes) && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 13 }}>
+              {conf != null && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--t2)' }}>
+                  <i className={`ti ${confBaixa ? 'ti-alert-triangle' : 'ti-circle-check'}`}
+                     style={{ fontSize: 15, color: confBaixa ? 'var(--yellow-t)' : 'var(--green-t)' }} />
+                  <strong style={{ color: 'var(--t0)', fontWeight: 600 }}>{Math.round(conf * 100)}%</strong>
+                  de confiança na extração
+                </span>
+              )}
+              {audit.semDados > 0 && (
+                <>
+                  <span style={{ color: 'var(--bd2)' }}>·</span>
+                  <span style={{ color: 'var(--t2)' }}>
+                    {audit.semDados} de {audit.total} indicadores sem dados no documento
+                  </span>
+                </>
+              )}
+              {analysis.notes && (
+                <button
+                  onClick={() => setNotesOpen(o => !o)}
+                  style={{
+                    background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12,
+                    color: 'var(--t3)', display: 'inline-flex', alignItems: 'center', gap: 3,
+                    textDecoration: 'underline', textUnderlineOffset: 3,
+                  }}
+                >
+                  {notesOpen ? 'ocultar' : 'como foi extraído'}
+                </button>
+              )}
+            </div>
+            {confBaixa && (
+              <div style={{ fontSize: 12, color: 'var(--yellow-t)', marginTop: 4 }}>
+                Confira os valores no Balanço Patrimonial e na DSP antes de usar este material.
+              </div>
+            )}
+            {analysis.notes && notesOpen && (
+              <div style={{
+                marginTop: 10, paddingLeft: 12, borderLeft: '2px solid var(--bd)',
+                fontSize: 12, color: 'var(--t3)', lineHeight: 1.65, maxWidth: 820,
+              }}>
+                {analysis.notes}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Período menor que o ano: parte dos indicadores é anualizada, e isso
+            precisa estar dito — senão um ROE de janeiro é lido como apurado. */}
+        {indicators?._anualizado && (
+          <div style={{ marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: 'var(--t2)', lineHeight: 1.6 }}>
+            <i className="ti ti-info-circle" style={{ fontSize: 15, color: 'var(--blue-text)', flexShrink: 0, marginTop: 1 }} />
+            <span>
+              Este período cobre {indicators._anualizado.periodMonths === 1
+                ? 'um mês'
+                : `${indicators._anualizado.periodMonths} meses`}.
+              Os indicadores marcados com <strong>a.a.</strong> foram levados à base anual
+              (×{indicators._anualizado.fator}) para poderem ser lidos junto dos demais —
+              são o ritmo do período projetado para 12 meses, não o valor realizado.
+              Valores absolutos, como o EBITDA, seguem sendo os do período.
+            </span>
+          </div>
+        )}
+
+        {/* ── Onde está o problema ── */}
+        {audit.criticos.length > 0 && (
+          <div style={{
+            marginBottom: 20, padding: '14px 16px', borderRadius: 10,
+            background: 'var(--red-dim)', border: '1px solid rgba(208,29,33,.3)',
+          }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
+              <i className="ti ti-alert-circle" style={{ fontSize: 18, color: 'var(--red-t)' }} />
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t0)' }}>
+                {audit.criticos.length === 1
+                  ? '1 indicador em estado crítico'
+                  : `${audit.criticos.length} indicadores em estado crítico`}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {audit.criticos.map(c => (
+                <button key={c.k} onClick={() => {
+                  document.getElementById(`pilar-${c.pilarKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px',
+                  borderRadius: 100, border: '1px solid rgba(208,29,33,.3)', background: 'var(--bg1)',
+                  fontSize: 12, color: 'var(--t0)', cursor: 'pointer',
+                }}>
+                  {c.label}
+                  <strong style={{ color: 'var(--red-t)' }}>{f(c.valor, c.fn)}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── Stats Cards ── */}
         <div className="dash-grid" style={{ marginBottom: 24 }}>
           {[
-            { label: 'Ativo Total', val: f(bp?.total_ativo, brl), icon: 'ti-building-bank' },
-            { label: 'Receita / Ingressos', val: f(dsp?.receita_liquida ?? dsp?.ingressos, brl), icon: 'ti-trending-up' },
-            { label: 'EBITDA', val: f(ebitda, brl), icon: 'ti-chart-bar' },
-            { label: 'Sobras / Perdas', val: f(sobras, brl), icon: 'ti-wallet', neg: (sobras ?? 0) < 0 },
-          ].map(({ label, val, icon, neg }) => (
+            { label: 'Ativo Total', val: f(bp?.total_ativo, brl), icon: 'ti-building-bank',
+              info: 'Tudo o que a organização tem: caixa, estoques, contas a receber, imóveis, máquinas. É o tamanho do patrimônio colocado para trabalhar.' },
+            { label: 'Receita / Ingressos', val: f(dsp?.receita_liquida ?? dsp?.ingressos, brl), icon: 'ti-trending-up',
+              info: 'O que entrou com a atividade no período, já descontados impostos sobre vendas, devoluções e abatimentos.' },
+            { label: 'EBITDA', val: f(ebitda, brl), icon: 'ti-chart-bar', info: INDICATOR_HELP.ebitda },
+            { label: 'Sobras / Perdas', val: f(sobras, brl), icon: 'ti-wallet', neg: (sobras ?? 0) < 0,
+              info: 'Resultado final do período. Em cooperativas não se chama lucro: sobras quando positivo, perdas quando negativo.' },
+          ].map(({ label, val, icon, neg, info }) => (
             <div key={label} className="dash-card">
               <div className="dash-card-head">
-                <span className="dash-card-label">{label}</span>
+                <span className="dash-card-label" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  {label}{info && <InfoTooltip text={info} />}
+                </span>
                 <i className={`ti ${icon} dash-card-icon`}></i>
               </div>
               <div className="dash-card-val" style={neg ? { color: 'var(--red-t)' } : {}}>{val}</div>
@@ -395,7 +658,10 @@ export default function AnalysisView() {
 
         {/* ── Scorecard Saúde Financeira ── */}
         <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, marginBottom: 24 }}>
-          <h2 style={{ fontSize: 20, marginBottom: 16 }}>Saúde Financeira</h2>
+          <h2 style={{ fontSize: 20, marginBottom: 16, display: 'flex', alignItems: 'center' }}>
+            Saúde Financeira
+            <InfoTooltip text="Leitura rápida de cada pilar a partir do seu indicador-chave: liquidez corrente, endividamento total, ROE, ciclo operacional e saldo de tesouraria. Verde = dentro do benchmark, amarelo = atenção, vermelho = crítico." />
+          </h2>
           <div className="grid-5">
             {SCORECARD.map(({ key, label, icon }) => {
               const r = scoreGrade(key, indicators);
@@ -417,21 +683,23 @@ export default function AnalysisView() {
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '.05em' }}>✨ Sumário Executivo</span>
           </div>
           {narrative?.sumario ? (
-            <p style={{ fontFamily: 'var(--font-serif)', fontSize: 18, lineHeight: 1.7, color: 'var(--t0)', marginBottom: 20 }}>{narrative.sumario}</p>
+            <p style={{ fontFamily: 'var(--font-serif)', fontSize: 18, lineHeight: 1.7, color: 'var(--t0)', marginBottom: 20 }}>{recToText(narrative.sumario)}</p>
           ) : (
             <p style={{ fontFamily: 'var(--font-serif)', fontSize: 18, lineHeight: 1.7, color: 'var(--t3)', fontStyle: 'italic', marginBottom: 20 }}>Gere o relatório com IA para visualizar o sumário executivo.</p>
           )}
           <div className="grid-3">
             {[
-              { label: 'Liquidez Corrente', val: num(lcVal), color: lcColor },
-              { label: 'Endividamento Total', val: pct(etVal), color: etColor },
-              { label: thirdLabel, val: thirdFormatted, color: thirdColor },
-            ].map(({ label, val, color }) => {
+              { label: 'Liquidez Corrente', val: num(lcVal), color: lcColor, help: INDICATOR_HELP.liquidez_corrente },
+              { label: 'Endividamento Total', val: pct(etVal), color: etColor, help: INDICATOR_HELP.endividamento_total_pct },
+              { label: thirdLabel, val: thirdFormatted, color: thirdColor, help: thirdHelp },
+            ].map(({ label, val, color, help }) => {
               const c = GC[color] || GC[''];
               return (
                 <div key={label} style={{ padding: '14px 16px', borderRadius: 10, background: c.bg, border: `1px solid ${c.bd}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
-                    <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 4, display: 'flex', alignItems: 'center' }}>
+                      {label}{help && <InfoTooltip text={help} />}
+                    </div>
                     <div className="display-val-md" style={{ color: 'var(--t0)' }}>{val}</div>
                   </div>
                   <span style={{ fontSize: 12, fontWeight: 500, color: c.t, padding: '3px 10px', borderRadius: 100, background: c.bg, border: `1px solid ${c.bd}` }}>
@@ -452,10 +720,16 @@ export default function AnalysisView() {
             {PILARES.map(pilar => {
               const pm = PILAR_META[pilar.key];
               const data = indicators?.[pilar.key] || {};
+              const prevInd = prev?.indicators
+                ? (typeof prev.indicators === 'string' ? JSON.parse(prev.indicators) : prev.indicators)
+                : null;
               return (
-                <div key={pilar.key} style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24 }}>
+                <div key={pilar.key} id={`pilar-${pilar.key}`} style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, padding: 24, scrollMarginTop: 16 }}>
                   <div style={{ marginBottom: 16 }}>
-                    <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)', marginBottom: 4 }}>{pm?.title || pilar.label}</h3>
+                    <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)', marginBottom: 4, display: 'flex', alignItems: 'center' }}>
+                      {pm?.title || pilar.label}
+                      {PILAR_HELP[pilar.key] && <InfoTooltip text={PILAR_HELP[pilar.key]} />}
+                    </h3>
                     <p style={{ fontSize: 13, color: 'var(--t3)', margin: 0 }}>{pm?.desc || ''}</p>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -471,11 +745,22 @@ export default function AnalysisView() {
                           borderBottom: idx < pilar.items.length - 1 ? '1px solid var(--bd)' : 'none'
                         }}>
                           <div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t0)' }}>{label}</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t0)', display: 'flex', alignItems: 'center' }}>
+                              {label}
+                              {INDICATOR_HELP[k] && <InfoTooltip text={INDICATOR_HELP[k]} />}
+                            </div>
                             {meta && <div style={{ fontSize: 12, color: 'var(--t3)', marginTop: 2 }}>Benchmark: {meta.benchmark}</div>}
                           </div>
                           <div className="display-val-lg" style={{ color: 'var(--t0)', textAlign: 'center' }}>
                             {f(raw, fn)}
+                            {indicators?._anualizado && ANUALIZADOS.has(k) && raw != null && (
+                              <span title="Valor anualizado" style={{ fontSize: 11, color: 'var(--t3)', marginLeft: 4, verticalAlign: 'super' }}>a.a.</span>
+                            )}
+                            {prevInd && (
+                              <div style={{ marginTop: 2, lineHeight: 1.3 }}>
+                                <Delta k={k} atual={raw} anterior={prevInd[pilar.key]?.[k]} periodo={periodShort(prev)} />
+                              </div>
+                            )}
                           </div>
                           <div style={{ textAlign: 'center' }}>
                             <span style={{ fontSize: 10, fontWeight: 600, color: statusDot(color), padding: '2px 8px', borderRadius: 100, background: c.bg, border: `1px solid ${c.bd}`, whiteSpace: 'nowrap' }}>
@@ -492,6 +777,30 @@ export default function AnalysisView() {
             })}
           </div>
         </div>
+
+        {/* Sem narrativa, a Visão Geral terminava nos indicadores sem dizer que
+            o diagnóstico e as recomendações podem ser gerados — o botão só
+            existia na aba Relatório, onde quem está lendo aqui não vai. */}
+        {!narrative && (
+          <div style={{
+            background: 'var(--bg1)', border: '1px dashed var(--bd2)', borderRadius: 12,
+            padding: 28, marginBottom: 24, textAlign: 'center',
+          }}>
+            <i className="ti ti-sparkles" style={{ fontSize: 28, color: 'var(--gold)' }} />
+            <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 20, color: 'var(--t0)', margin: '10px 0 6px' }}>
+              Diagnóstico e recomendações
+            </h3>
+            <p style={{ fontSize: 14, color: 'var(--t2)', maxWidth: 460, margin: '0 auto 18px', lineHeight: 1.6 }}>
+              A partir dos indicadores acima, a IA redige o SWOT financeiro e as recomendações
+              estratégicas — que também vão para o relatório em Word.
+            </p>
+            <button className="btn btn-p" onClick={generateNarrativeAI} disabled={genNarrative}>
+              {genNarrative
+                ? <><i className="ti ti-loader" style={{ animation: 'spin .8s linear infinite' }}></i> Gerando…</>
+                : <><i className="ti ti-sparkles"></i> Gerar diagnóstico com IA</>}
+            </button>
+          </div>
+        )}
 
         {/* ── 3. SWOT ── */}
         {narrative && (
@@ -541,7 +850,8 @@ export default function AnalysisView() {
               <p style={{ fontFamily: 'var(--font-serif)', fontSize: 18, lineHeight: 1.7, color: 'var(--t3)', fontStyle: 'italic', margin: 0 }}>Gere o relatório com IA para visualizar as recomendações estratégicas.</p>
             ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-              {narrative.recomendacoes.map((rec, i) => {
+              {narrative.recomendacoes.map((recRaw, i) => {
+                const rec = recToText(recRaw);
                 const colonIdx = rec.indexOf(':');
                 const title = colonIdx > 0 ? rec.substring(0, colonIdx).replace(/^Recomendação\s*\d*\s*/i, '').trim() : `Recomendação ${i + 1}`;
                 const desc = colonIdx > 0 ? rec.substring(colonIdx + 1).trim() : rec;
@@ -641,11 +951,11 @@ export default function AnalysisView() {
             <div style={{ marginTop: 32, marginBottom: 20 }}>
               <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: 18, color: 'var(--t0)', marginBottom: 16 }}>4. Recomendações Estratégicas</h3>
               {editMode
-                ? <AutoTextarea value={(narrative.recomendacoes || []).join('\n')} onChange={e => updateNarrative('recomendacoes', e.target.value.split('\n').filter(l => l.trim()))} placeholder="Uma recomendação por linha..." />
+                ? <AutoTextarea value={(narrative.recomendacoes || []).map(recToText).join('\n')} onChange={e => updateNarrative('recomendacoes', e.target.value.split('\n').filter(l => l.trim()))} placeholder="Uma recomendação por linha..." />
                 : <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {(narrative.recomendacoes || []).map((r, i) => (
                       <li key={i} style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--t1)', display: 'flex', gap: 8, padding: '8px 12px', background: 'var(--bg2)', borderRadius: 6 }}>
-                        <span style={{ color: 'var(--gold)', fontWeight: 600, flexShrink: 0 }}>{i + 1}.</span>{r}
+                        <span style={{ color: 'var(--gold)', fontWeight: 600, flexShrink: 0 }}>{i + 1}.</span>{recToText(r)}
                       </li>
                     ))}
                   </ul>}
@@ -672,7 +982,10 @@ export default function AnalysisView() {
                       const sl = { green: 'Bom', yellow: 'Atenção', red: 'Crítico', '': '—' }[color] || '—';
                       return (
                         <tr key={k}>
-                          <td style={{ display: 'flex', alignItems: 'center' }}>{label}{INDICATOR_TOOLTIP[k] && <InfoTooltip text={INDICATOR_TOOLTIP[k]} />}</td>
+                          {/* display:flex num <td> tira a célula do layout de
+                              tabela e desalinha as colunas entre as linhas —
+                              o flex vai num wrapper interno. */}
+                          <td><span style={{ display: 'inline-flex', alignItems: 'center' }}>{label}{INDICATOR_HELP[k] && <InfoTooltip text={INDICATOR_HELP[k]} />}</span></td>
                           <td className="r">{f(raw, fn)}</td>
                           <td style={{ textAlign: 'right' }}>
                             <span style={{ fontSize: 12, fontWeight: 500, color: c.t, padding: '3px 10px', borderRadius: 100, background: c.bg, display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: 99, background: c.t, flexShrink: 0 }}></span>{sl}</span>

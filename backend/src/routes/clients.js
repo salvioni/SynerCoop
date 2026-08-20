@@ -2,14 +2,15 @@ import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import multer from 'multer';
 import { db } from '../lib/db.js';
-import { authRequired } from '../middleware/auth.js';
+import { authRequired, trialAtivo } from '../middleware/auth.js';
 import { badRequest, trim } from '../lib/validate.js';
 import { audit, ACTIONS, countMonthlyAnalyses } from '../lib/audit.js';
 import logger from '../lib/logger.js';
 import { extractFromFile } from '../lib/extractor.js';
+import { detectPeriodFromFilename, monthsInPeriod, periodKindLabel, samePeriodKind } from '../lib/period.js';
 import { calculateIndicators } from '../lib/calculator.js';
 import { generateAnalysisNarrative } from '../lib/narrative.js';
-import { PLAN_LIMITS } from '../lib/plans.js';
+import { PLAN_LIMITS, getClientLimit, PLAN_LABELS } from '../lib/plans.js';
 
 // Barra tanto a extração (que já custa uma chamada de IA) quanto o salvamento
 // final da análise quando o tenant já bateu o limite mensal do plano — sem
@@ -26,6 +27,31 @@ async function assertUnderMonthlyLimit(tenantId) {
     throw badRequest(
       `Limite de ${limit} análises/mês atingido no plano ${(tenant?.plan || 'trial').toUpperCase()}. Faça upgrade para continuar.`,
       { code: 'ANALYSIS_LIMIT_REACHED' }
+    );
+  }
+}
+
+/**
+ * O teste comporta uma empresa só. Contas de entidade única já nascem com o
+ * cliente-espelho (elas próprias), então na prática a cota delas já está
+ * ocupada — e é exatamente o que se espera: no teste, ou você analisa a sua
+ * organização, ou uma empresa cliente.
+ *
+ * Só conta os ativos: arquivar libera a vaga (e reativar volta a ocupá-la,
+ * verificado no PUT), enquanto o histórico da empresa arquivada continua lá.
+ */
+async function assertUnderClientLimit(tenantId) {
+  const tenant = await db.prepare('SELECT plan FROM tenants WHERE id = ?').get(tenantId);
+  const limit = getClientLimit(tenant?.plan);
+  if (limit === Infinity) return;
+  const { cnt } = await db.prepare(
+    'SELECT COUNT(*) AS cnt FROM clients WHERE tenant_id = ? AND active = 1'
+  ).get(tenantId);
+  if (cnt >= limit) {
+    throw badRequest(
+      `O ${(PLAN_LABELS[tenant?.plan] || 'plano atual').toLowerCase()} permite `
+      + `${limit} ${limit === 1 ? 'empresa' : 'empresas'}. Assine um plano para cadastrar mais.`,
+      { code: 'CLIENT_LIMIT_REACHED' }
     );
   }
 }
@@ -63,6 +89,8 @@ const upload = multer({
 
 const router = Router();
 router.use(authRequired);
+// Teste vencido: leitura continua, escrita para. Ver trialAtivo.
+router.use(trialAtivo);
 
 // GET /clients — lista clientes com paginação
 // Aceita: ?search=, ?active=, ?page=, ?limit=
@@ -126,6 +154,7 @@ router.post('/', async (req, res, next) => {
     const logo_color = req.body?.logo_color || null;
 
     if (!name) throw badRequest('Nome é obrigatório.', { name: 'Informe o nome da empresa.' });
+    await assertUnderClientLimit(req.user.tenant_id);
     if (logo) {
       if (logo.length > 2 * 1024 * 1024 * 1.4) throw badRequest('Imagem muito grande. Máximo 2 MB.');
       validateLogoDataUrl(logo);
@@ -169,7 +198,7 @@ router.get('/:id', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const existing = await db.prepare('SELECT id FROM clients WHERE id = ? AND tenant_id = ?')
+    const existing = await db.prepare('SELECT id, active FROM clients WHERE id = ? AND tenant_id = ?')
       .get(id, req.user.tenant_id);
     if (!existing) throw badRequest('Cliente não encontrado.');
 
@@ -189,6 +218,13 @@ router.put('/:id', async (req, res, next) => {
       validateLogoDataUrl(logo);
     }
     if (logo_color && !/^#[0-9A-Fa-f]{6}$/.test(logo_color)) throw badRequest('Cor inválida.');
+
+    // `active` cai em 1 quando o corpo não manda o campo, então salvar um
+    // cliente arquivado o reativa. Se isso estourar a cota do plano, é uma
+    // criação disfarçada de edição — a mesma trava vale aqui.
+    if (active === 1 && existing.active === 0) {
+      await assertUnderClientLimit(req.user.tenant_id);
+    }
 
     const extraCols = [...(logo !== undefined ? [', logo = ?'] : []), ...(logo_color !== undefined ? [', logo_color = ?'] : [])].join('');
     const extraVals = [...(logo !== undefined ? [logo] : []), ...(logo_color !== undefined ? [logo_color] : [])];
@@ -216,6 +252,65 @@ router.delete('/:id', async (req, res, next) => {
     await db.prepare('UPDATE clients SET active = 0 WHERE id = ?').run(id);
     await audit(req, ACTIONS.CLIENT_DELETED, { targetType: 'client', targetId: id, targetLabel: client.name });
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// O tipo de período de um cliente é definido pela PRIMEIRA análise dele e vale
+// para todas as seguintes. Misturar mensal com anual no mesmo cliente produz
+// uma linha do tempo que não se compara: os saldos do balanço são fotos de
+// datas diferentes e os valores da DSP acumulam janelas de tamanhos diferentes.
+// Melhor recusar na entrada do que deixar o histórico virar bagunça.
+async function periodoBaseDoCliente(clientId) {
+  const primeira = await db.prepare(
+    'SELECT period_label FROM analyses WHERE client_id = ? ORDER BY year, created_at LIMIT 1'
+  ).get(clientId);
+  // Sem análise nenhuma ainda: o cliente não tem base — a primeira define.
+  return primeira === undefined ? null : {
+    periodLabel: primeira.period_label,
+    kind: periodKindLabel(primeira.period_label),
+    kindPlural: periodKindLabel(primeira.period_label, true),
+  };
+}
+
+// GET /clients/:id/check-period?filename=... — o período que o nome do arquivo
+// sugere já foi analisado?
+//
+// Existe para avisar ANTES do upload. A checagem de duplicidade definitiva fica
+// no POST de criação (é o servidor que decide), mas ela só roda depois da
+// extração — que gasta uma chamada de IA, conta no limite do plano e leva
+// dezenas de segundos. Descobrir ali que o período já existe joga tudo isso
+// fora. Aqui o período sai do próprio nome do arquivo, sem custo nenhum.
+//
+// Reaproveita detectPeriodFromFilename, a mesma função usada na extração — a
+// detecção continua com uma fonte da verdade só.
+router.get('/:id/check-period', async (req, res, next) => {
+  try {
+    const client = await db.prepare('SELECT id FROM clients WHERE id = ? AND tenant_id = ?')
+      .get(req.params.id, req.user.tenant_id);
+    if (!client) throw badRequest('Cliente não encontrado.');
+
+    const detected = detectPeriodFromFilename(trim(req.query?.filename) || '');
+    // Sem período no nome do arquivo não dá para dizer nada: só a extração
+    // revela o período, e aí o POST cuida do resto.
+    if (!detected) return res.json({ detected: null, duplicate: false });
+
+    const dup = await db.prepare(
+      'SELECT id FROM analyses WHERE client_id = ? AND year = ? AND COALESCE(period_label, \'\') = COALESCE(?, \'\')'
+    ).get(client.id, detected.year, detected.label || null);
+
+    const base = await periodoBaseDoCliente(client.id);
+    const incompativel = base && !samePeriodKind(base.periodLabel, detected.label || null);
+
+    res.json({
+      detected: { year: detected.year, period_label: detected.label || null },
+      duplicate: !!dup,
+      analysisId: dup?.id || null,
+      // Tipo de período já estabelecido para este cliente, quando o arquivo
+      // escolhido não bate com ele.
+      periodMismatch: incompativel
+        ? { esperado: base.kind, recebido: periodKindLabel(detected.label || null) }
+        : null,
+    });
   } catch (e) { next(e); }
 });
 
@@ -269,7 +364,7 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
       throw badRequest('Envie um arquivo ou forneça os dados bp/dsp manualmente.');
     }
 
-    const indicators = calculateIndicators({ bp: bpData, dsp: dspData });
+    const indicators = calculateIndicators({ bp: bpData, dsp: dspData, periodMonths: monthsInPeriod(periodLabel) });
 
     // Um "ano" pode ter várias análises quando o período é mais granular (ex:
     // Julho de 2025 e Agosto de 2025 no mesmo ano) — o que não pode repetir é
@@ -277,9 +372,18 @@ router.post('/:id/analyses', upload.single('file'), async (req, res, next) => {
     // tratado como seu próprio período, então só bloqueia duplicar o ano
     // "cheio", não bloqueia um mês/trimestre específico dentro dele.
     const dup = await db.prepare(
-      'SELECT id FROM analyses WHERE client_id = ? AND year = ? AND (period_label = ? OR (period_label IS NULL AND ? IS NULL))'
-    ).get(client.id, year, periodLabel, periodLabel);
+      'SELECT id FROM analyses WHERE client_id = ? AND year = ? AND COALESCE(period_label, \'\') = COALESCE(?, \'\')'
+    ).get(client.id, year, periodLabel);
     if (dup) throw badRequest(`Já existe uma análise para ${periodLabel || `o ano ${year}`} deste cliente.`, { year: 'Período já analisado.' });
+
+    const base = await periodoBaseDoCliente(client.id);
+    if (base && !samePeriodKind(base.periodLabel, periodLabel)) {
+      throw badRequest(
+        `As análises deste cliente são ${base.kindPlural} — este arquivo é ${periodKindLabel(periodLabel)}. ` +
+        `Períodos de tamanhos diferentes não se comparam entre si, então o cliente segue um padrão só.`,
+        { period_label: `Envie um documento ${base.kind}.` }
+      );
+    }
 
     const id = nanoid(10);
 

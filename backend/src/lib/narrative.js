@@ -68,8 +68,61 @@ export function buildNarrativePrompt({ companyName, companyType, year, indicator
     .replace('{dsp_json}', JSON.stringify(dsp, null, 2));
 }
 
+/**
+ * Converte uma recomendação para o texto "Título: descrição".
+ *
+ * O prompt pede uma lista de strings, mas os modelos às vezes devolvem objetos
+ * ({titulo, descricao}) — e aí todo consumidor que trata a recomendação como
+ * texto quebra: a tela da análise fazia `rec.indexOf(':')` e derrubava a página
+ * inteira, e o relatório Word fazia `rec.replace(...)` e derrubava o download.
+ * Normalizar aqui, na fronteira com a IA, deixa o resto do sistema podendo
+ * confiar que recomendação é string.
+ */
+export function normalizeRecomendacao(rec) {
+  if (typeof rec === 'string') return rec;
+  if (rec && typeof rec === 'object') {
+    const titulo = rec.titulo ?? rec.title ?? rec.acao ?? rec.nome ?? '';
+    const desc   = rec.descricao ?? rec.description ?? rec.detalhe ?? rec.texto ?? rec.acao_necessaria ?? '';
+    if (titulo && desc) return `${titulo}: ${desc}`;
+    const unico = titulo || desc;
+    if (unico) return String(unico);
+    // Formato inesperado: melhor mostrar algo legível do que quebrar.
+    return Object.values(rec).filter(v => typeof v === 'string').join(': ') || JSON.stringify(rec);
+  }
+  return String(rec ?? '');
+}
+
+// Campos que o prompt define como parágrafo único de texto.
+const CAMPOS_TEXTO = [
+  'sumario_executivo', 'sumario', 'liquidez', 'rentabilidade', 'endividamento',
+  'capacidade_operacional', 'tesouraria', 'forcas', 'fraquezas', 'riscos',
+];
+
+// Mesmo tratamento das recomendações, para os campos de texto: se vier uma
+// lista ou um objeto onde o prompt pediu um parágrafo, vira texto legível em
+// vez de "[object Object]" — ou de um crash, quando o valor é renderizado
+// direto como filho de um elemento React.
+function asTexto(v) {
+  if (v == null || typeof v === 'string') return v;
+  if (Array.isArray(v)) return v.map(normalizeRecomendacao).join(' ');
+  if (typeof v === 'object') return normalizeRecomendacao(v);
+  return String(v);
+}
+
+export function normalizeNarrative(n) {
+  if (!n || typeof n !== 'object') return n;
+  const out = { ...n };
+  if (Array.isArray(out.recomendacoes)) {
+    out.recomendacoes = out.recomendacoes.map(normalizeRecomendacao);
+  }
+  for (const campo of CAMPOS_TEXTO) {
+    if (campo in out) out[campo] = asTexto(out[campo]);
+  }
+  return out;
+}
+
 export async function generateAnalysisNarrative({ companyName, companyType, year, indicators, bp, dsp }) {
   const prompt = buildNarrativePrompt({ companyName, companyType, year, indicators, bp, dsp });
   const raw = await generateText(prompt, { maxTokens: 8000 });
-  return parseJsonFromLLM(raw);
+  return normalizeNarrative(parseJsonFromLLM(raw));
 }

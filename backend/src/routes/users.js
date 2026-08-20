@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import bcrypt from 'bcryptjs';
 import { db } from '../lib/db.js';
-import { authRequired, managerOnly } from '../middleware/auth.js';
+import { authRequired, managerOnly, trialAtivo } from '../middleware/auth.js';
+import { getUserLimit, PLAN_LABELS } from '../lib/plans.js';
 import { badRequest, isValidEmail, trim } from '../lib/validate.js';
 import { sendInviteEmail } from '../lib/email.js';
 import { audit, ACTIONS } from '../lib/audit.js';
@@ -47,7 +48,7 @@ router.get('/', authRequired, async (req, res, next) => {
 });
 
 // POST /users/invite — gerente convida colaborador
-router.post('/invite', authRequired, managerOnly, async (req, res, next) => {
+router.post('/invite', authRequired, trialAtivo, managerOnly, async (req, res, next) => {
   try {
     const name = trim(req.body?.name);
     const email = trim(req.body?.email)?.toLowerCase();
@@ -59,7 +60,23 @@ router.post('/invite', authRequired, managerOnly, async (req, res, next) => {
     const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email);
     if (existing) throw badRequest('Já existe um usuário com este e-mail.', { email: 'E-mail já cadastrado.' });
 
-    const tenant = await db.prepare('SELECT name FROM tenants WHERE id = ?').get(req.user.tenant_id);
+    const tenant = await db.prepare('SELECT name, plan FROM tenants WHERE id = ?').get(req.user.tenant_id);
+
+    // Convite pendente já ocupa vaga: o usuário existe na tabela desde o
+    // convite, e não travar aqui deixaria o gerente disparar dez convites e
+    // estourar a cota assim que todos aceitassem.
+    const limiteUsuarios = getUserLimit(tenant?.plan);
+    if (limiteUsuarios !== Infinity) {
+      const { cnt } = await db.prepare('SELECT COUNT(*) AS cnt FROM users WHERE tenant_id = ?')
+        .get(req.user.tenant_id);
+      if (cnt >= limiteUsuarios) {
+        throw badRequest(
+          `O ${(PLAN_LABELS[tenant?.plan] || 'plano atual').toLowerCase()} permite ${limiteUsuarios} `
+          + `${limiteUsuarios === 1 ? 'usuário' : 'usuários'}. Assine um plano para convidar mais pessoas.`,
+          { code: 'USER_LIMIT_REACHED' }
+        );
+      }
+    }
 
     const userId = nanoid(10);
     const dummyHash = await bcrypt.hash(nanoid(32), 12);
@@ -82,7 +99,7 @@ router.post('/invite', authRequired, managerOnly, async (req, res, next) => {
 });
 
 // POST /users/:id/resend-invite — reenvia o convite com token novo e prazo renovado
-router.post('/:id/resend-invite', authRequired, managerOnly, async (req, res, next) => {
+router.post('/:id/resend-invite', authRequired, trialAtivo, managerOnly, async (req, res, next) => {
   try {
     const { id } = req.params;
 
@@ -121,7 +138,7 @@ router.post('/:id/resend-invite', authRequired, managerOnly, async (req, res, ne
 });
 
 // PATCH /users/:id/role
-router.patch('/:id/role', authRequired, managerOnly, async (req, res, next) => {
+router.patch('/:id/role', authRequired, trialAtivo, managerOnly, async (req, res, next) => {
   try {
     const { id } = req.params;
     const role = req.body?.role;
@@ -137,7 +154,7 @@ router.patch('/:id/role', authRequired, managerOnly, async (req, res, next) => {
 });
 
 // DELETE /users/:id
-router.delete('/:id', authRequired, managerOnly, async (req, res, next) => {
+router.delete('/:id', authRequired, trialAtivo, managerOnly, async (req, res, next) => {
   try {
     const { id } = req.params;
     const user = await db.prepare('SELECT id, role FROM users WHERE id = ? AND tenant_id = ?')

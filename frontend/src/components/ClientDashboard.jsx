@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useBackNavigate } from '../lib/useBackNavigate.js';
@@ -7,6 +7,7 @@ import ClientFormModal from './ClientFormModal.jsx';
 import { initials } from './UserAvatar.jsx';
 import InfoTooltip from './InfoTooltip.jsx';
 import AnalysisRow from './AnalysisRow.jsx';
+import EmptyNote from './EmptyNote.jsx';
 import { periodLabel, periodShort } from '../lib/period.js';
 import { SIGNING_ENABLED } from '../lib/constants.js';
 import {
@@ -21,15 +22,18 @@ const brl = v => v != null ? FMT.format(v) : '—';
 const pct = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
 const num = v => v != null ? Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 
-// Chart palette — alinhado ao tema do relatório Word
+// Paleta dos gráficos — definida em main.css (:root e .theme-dark). O SVG
+// resolve var() em atributos de apresentação, então a mesma marcação serve aos
+// dois temas: no escuro os tons são reescalonados pra superfície escura, onde
+// o azul-marinho do relatório impresso ficaria invisível.
 const C = {
-  navy:  '#0D1E3B',
-  blue:  '#1B3E8A',
-  gold:  '#C87F1A',
-  green: '#14874E',
-  red:   '#D01D21',
-  slate: '#4A6280',
-  muted: '#8A929D',
+  navy:  'var(--ch-navy)',
+  blue:  'var(--ch-blue)',
+  gold:  'var(--ch-gold)',
+  green: 'var(--ch-green)',
+  red:   'var(--ch-red)',
+  slate: 'var(--ch-slate)',
+  muted: 'var(--ch-muted)',
 };
 const PIE_ATIVO   = [C.blue, C.gold, C.slate, C.muted];
 const PIE_PASSIVO = [C.gold, C.slate, C.green, C.muted];
@@ -89,8 +93,23 @@ function WaterfallTip({ active, payload }) {
   );
 }
 
+// Destaque do cursor nos gráficos.
+//
+// O padrão do Recharts é um retângulo cinza-claro OPACO por trás da série sob
+// o mouse. No tema claro ele lava a barra; no escuro vira um bloco branco por
+// cima do gráfico. Trocado por um véu translúcido que escurece de leve no
+// claro e clareia de leve no escuro, sem apagar o que está embaixo.
+const CURSOR = { fill: 'currentColor', fillOpacity: 0.06, stroke: 'var(--bd2)', strokeOpacity: 0.5 };
+
 // Eixos e grade reutilizáveis
 // Gridlines sólidas finas — traçado (strokeDasharray) é anti-padrão (lê como "projeção")
+// O ponto padrão do Recharts é branco por dentro — vira uma bolinha vazada que
+// no tema escuro salta mais que a própria linha. Aqui ele é sólido, na cor da
+// série, com um anel da superfície pra separar de linhas sobrepostas.
+const dot = (color, r = 4) => ({ r, fill: color, stroke: 'var(--bg1)', strokeWidth: 1.5 });
+// O ponto ativo (hover) tem o mesmo problema: anel branco fixo por padrão.
+const adot = color => ({ r: 6, fill: color, stroke: 'var(--bg1)', strokeWidth: 2 });
+
 const GRID    = <CartesianGrid stroke="var(--bd)" vertical={false} strokeWidth={0.5} />;
 const XAXIS   = <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'var(--t2)' }} axisLine={false} tickLine={false} />;
 const YAXBRL  = <YAxis tick={{ fontSize: 11, fill: 'var(--t2)' }} axisLine={false} tickLine={false} tickFormatter={v => FMT.format(v)} width={72} />;
@@ -119,7 +138,9 @@ function health(key, value) {
   };
   return rules[key]?.(value) ?? null;
 }
-const H_COLOR = { good: '#14874E', warn: '#C87F1A', bad: '#D01D21' };
+// Cores de status vêm do tema — no escuro o verde/vermelho impressos ficam
+// escuros demais contra o fundo.
+const H_COLOR = { good: 'var(--green-t)', warn: 'var(--yellow-t)', bad: 'var(--red-t)' };
 const H_LABEL = { good: 'Bom', warn: 'Atenção', bad: 'Crítico' };
 
 function ChartCard({ title, info, subtitle, noData, style: s, children }) {
@@ -158,10 +179,23 @@ function PieLegend({ data, colors }) {
 
 // Painel de análises de um único cliente — usado em ClientView.jsx
 // e em Dashboard.jsx para contas de entidade única (cooperativa/empresa/etc).
-export default function ClientDashboard({ clientId, backHref, allowDelete = true, hideHeader = false }) {
+/**
+ * Painel de um cliente. Também é o "Desempenho" das contas de entidade única
+ * (que não têm carteira) — daí os três ajustes de apresentação:
+ *   hideHeader  — esconde o cartão de identificação do cliente (logo/nome/tipo),
+ *                 redundante quando o cliente É a própria conta.
+ *   hideHistory — esconde o histórico de análises do rodapé, já que essas contas
+ *                 têm a página "Análises" dedicada no menu.
+ *   topSlot     — conteúdo opcional no topo (ex.: a saudação "Bom dia, Fulano"
+ *                 + título da página).
+ */
+export default function ClientDashboard({ clientId, backHref, allowDelete = true, hideHeader = false, hideHistory = false, topSlot = null }) {
   const navigate = useNavigate();
   const [client, setClient]       = useState(null);
   const [analyses, setAnalyses]   = useState([]);
+  // IDs das análises visíveis. null = todas — evita ter que sincronizar a
+  // seleção toda vez que a lista chega ou muda.
+  const [selectedIds, setSelectedIds] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [confirm, setConfirm]     = useState(null);
   const [editModal, setEditModal] = useState(false);
@@ -198,9 +232,39 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
     } catch (e) { setActionErr(e.message); }
   }
 
+  // Âncora da seta que liga o estado vazio ao botão "Nova análise" da lateral.
+
+
   if (loading || !client) return null;
 
-  const sorted      = [...analyses].sort((a, b) => a.year - b.year || new Date(a.created_at) - new Date(b.created_at));
+  // Conta/cliente sem nenhuma análise: cartões zerados e gráficos vazios não
+  // dizem nada. A tela vira um convite ao primeiro passo — incluindo baixar o
+  // modelo, porque quem acabou de criar a conta pode nem ter a planilha.
+  if (!analyses.length) {
+    return (
+      <div className="page-body">
+        {backHref && (
+          <button className="back" onClick={goBack} style={{ marginBottom: 16 }}>
+            <i className="ti ti-arrow-left" /> Voltar
+          </button>
+        )}
+        {topSlot}
+        {actionErr && (
+          <div className="err-banner" style={{ marginBottom: 16 }}>{actionErr}</div>
+        )}
+        <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12 }}>
+          <EmptyNote>Nenhuma análise ainda.</EmptyNote>
+        </div>
+      </div>
+    );
+  }
+
+  // Ordem cronológica de todas as análises — base tanto do filtro quanto dos
+  // gráficos. O filtro entra ANTES de `parsed`, então cards, gráficos e
+  // comparações passam todos a refletir só os períodos escolhidos.
+  const allSorted   = [...analyses].sort((a, b) => a.year - b.year || new Date(a.created_at) - new Date(b.created_at));
+  const isVisible   = a => !selectedIds || selectedIds.includes(a.id);
+  const sorted      = allSorted.filter(isVisible);
   const parsed      = sorted.map(parseAnalysis);
   const latest      = parsed[parsed.length - 1];
   const prev        = parsed.length >= 2 ? parsed[parsed.length - 2] : null;
@@ -511,6 +575,8 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
         </button>
       )}
 
+      {topSlot}
+
       {/* Banner de erro (substituindo alert()) */}
       {actionErr && (
         <div style={{ background: 'var(--red-bg,#ffebee)', color: 'var(--red-t,#c41d1d)', border: '1px solid var(--red-bd,#f5c6cb)', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -565,6 +631,55 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
           </div>
         </div>
       )}
+
+        {/* ── Filtro de períodos ───────────────────────────────────── */}
+        {allSorted.length > 1 && (
+          <div style={{
+            marginBottom: 20, padding: '14px 18px', background: 'var(--bg1)',
+            border: '1px solid var(--bd)', borderRadius: 10,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+              <span className="ty-label">Períodos comparados</span>
+              {selectedIds && (
+                <button onClick={() => setSelectedIds(null)} style={{
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                  fontSize: 12, color: 'var(--blue-text)', textDecoration: 'underline',
+                }}>
+                  Mostrar todos ({allSorted.length})
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {allSorted.map(a => {
+                const on = isVisible(a);
+                return (
+                  <button
+                    key={a.id}
+                    aria-pressed={on}
+                    onClick={() => {
+                      const atuais = selectedIds || allSorted.map(x => x.id);
+                      // Nunca deixa a seleção vazia — sem nenhum período não
+                      // há o que desenhar, e a tela ficaria em branco sem
+                      // explicação.
+                      const novos = on ? atuais.filter(id => id !== a.id) : [...atuais, a.id];
+                      if (!novos.length) return;
+                      setSelectedIds(novos.length === allSorted.length ? null : novos);
+                    }}
+                    style={{
+                      padding: '6px 14px', borderRadius: 100, cursor: 'pointer', fontSize: 13,
+                      border: `1px solid ${on ? 'var(--blue-text)' : 'var(--bd)'}`,
+                      background: on ? 'var(--blue-dim)' : 'var(--bg2)',
+                      color: on ? 'var(--blue-text)' : 'var(--t2)',
+                      fontWeight: on ? 500 : 400,
+                    }}
+                  >
+                    {periodShort(a)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
       {/* ── Cards de resumo ───────────────────────────────────────────── */}
       <div className="dash-grid" style={{ marginBottom: 24 }}>
@@ -674,7 +789,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                   <ResponsiveContainer width="100%" height={H}>
                     <BarChart data={receitaData} barGap={4}>
                       {GRID}{XAXIS}{YAXBRL}
-                      <Tooltip content={<BrlTip />} />{LEG}
+                      <Tooltip content={<BrlTip />} cursor={CURSOR} />{LEG}
                       <Bar dataKey="Receita Líq." fill={C.blue} radius={[4,4,0,0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -692,10 +807,10 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                     <ResponsiveContainer width="100%" height={H}>
                       <ComposedChart data={resultFinData} barGap={4}>
                         {GRID}{XAXIS}{YAXBRL}
-                        <Tooltip content={<BrlTip />} />{LEG}
+                        <Tooltip content={<BrlTip />} cursor={CURSOR} />{LEG}
                         <Bar dataKey="EBITDA"             fill={C.blue}  radius={[4,4,0,0]} />
                         <Bar dataKey="Result. Financeiro" fill={C.red}   radius={[4,4,0,0]} />
-                        <Line type="monotone" dataKey="Sobras/Perdas" stroke={C.green} strokeWidth={2.5} dot={{ r: 5, fill: C.green }} connectNulls />
+                        <Line type="monotone" dataKey="Sobras/Perdas" stroke={C.green} strokeWidth={2.5} dot={dot(C.green, 5)} activeDot={adot(C.green)} connectNulls />
                       </ComposedChart>
                     </ResponsiveContainer>
                   </ChartCard>
@@ -712,10 +827,10 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                   <ResponsiveContainer width="100%" height={H}>
                     <LineChart data={liquidezData}>
                       {GRID}{XAXIS}{YAXNUM}
-                      <Tooltip content={<NumTip />} />{LEG}
+                      <Tooltip content={<NumTip />} cursor={CURSOR} />{LEG}
                       <ReferenceLine y={1} stroke={C.red} strokeDasharray="4 4" label={{ value: '1,0 mín.', position: 'insideTopRight', fontSize: 11, fill: C.red }} />
-                      <Line type="monotone" dataKey="Corrente" stroke={C.blue} strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                      <Line type="monotone" dataKey="Seca"     stroke={C.gold} strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                      <Line type="monotone" dataKey="Corrente" stroke={C.blue} strokeWidth={2} dot={dot(C.blue)} activeDot={adot(C.blue)} connectNulls />
+                      <Line type="monotone" dataKey="Seca"     stroke={C.gold} strokeWidth={2} dot={dot(C.gold)} activeDot={adot(C.gold)} connectNulls />
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartCard>
@@ -729,7 +844,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                   <ResponsiveContainer width="100%" height={H}>
                     <BarChart data={capitalData}>
                       {GRID}{XAXIS}{YAXPCT}
-                      <Tooltip content={<PctTip />} />{LEG}
+                      <Tooltip content={<PctTip />} cursor={CURSOR} />{LEG}
                       <Bar dataKey="Passivo CP"       stackId="a" fill={C.gold}  />
                       <Bar dataKey="Passivo LP"       stackId="a" fill={C.slate} />
                       <Bar dataKey="Patrim. Líquido"  stackId="a" fill={C.green} />
@@ -753,10 +868,10 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                   <ResponsiveContainer width="100%" height={H}>
                     <LineChart data={rentabData}>
                       {GRID}{XAXIS}{YAXPCT}
-                      <Tooltip content={<PctTip />} />{LEG}
+                      <Tooltip content={<PctTip />} cursor={CURSOR} />{LEG}
                       <ReferenceLine y={0} stroke={C.muted} strokeDasharray="4 4" />
-                      <Line type="monotone" dataKey="ROE" stroke={C.blue} strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                      <Line type="monotone" dataKey="ROA" stroke={C.gold} strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                      <Line type="monotone" dataKey="ROE" stroke={C.blue} strokeWidth={2} dot={dot(C.blue)} activeDot={adot(C.blue)} connectNulls />
+                      <Line type="monotone" dataKey="ROA" stroke={C.gold} strokeWidth={2} dot={dot(C.gold)} activeDot={adot(C.gold)} connectNulls />
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartCard>
@@ -770,10 +885,10 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                   <ResponsiveContainer width="100%" height={H}>
                     <ComposedChart data={cicloData}>
                       {GRID}{XAXIS}{YAXDIAS}
-                      <Tooltip content={<DiasTip />} />{LEG}
+                      <Tooltip content={<DiasTip />} cursor={CURSOR} />{LEG}
                       <Bar dataKey="PME" stackId="a" fill={C.blue} />
                       <Bar dataKey="PMR" stackId="a" fill={C.gold} radius={[4,4,0,0]} />
-                      <Line type="monotone" dataKey="Ciclo Financeiro" stroke={C.slate} strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                      <Line type="monotone" dataKey="Ciclo Financeiro" stroke={C.slate} strokeWidth={2} dot={dot(C.slate)} activeDot={adot(C.slate)} connectNulls />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </ChartCard>
@@ -790,11 +905,11 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                   <ResponsiveContainer width="100%" height={H}>
                     <ComposedChart data={fleurietData}>
                       {GRID}{XAXIS}{YAXBRL}
-                      <Tooltip content={<BrlTip />} />{LEG}
+                      <Tooltip content={<BrlTip />} cursor={CURSOR} />{LEG}
                       <ReferenceLine y={0} stroke={C.muted} strokeDasharray="4 4" />
                       <Area type="monotone" dataKey="Cap. de Giro" fill={C.blue} fillOpacity={0.12} stroke={C.blue} strokeWidth={2} connectNulls />
-                      <Line type="monotone" dataKey="NCG"        stroke={C.navy}  strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                      <Line type="monotone" dataKey="Tesouraria" stroke={C.green} strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                      <Line type="monotone" dataKey="NCG"        stroke={C.navy}  strokeWidth={2} dot={dot(C.navy)} activeDot={adot(C.navy)} connectNulls />
+                      <Line type="monotone" dataKey="Tesouraria" stroke={C.green} strokeWidth={2} dot={dot(C.green)} activeDot={adot(C.green)} connectNulls />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </ChartCard>
@@ -825,7 +940,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                       axisLine={false} tickLine={false}
                       width={148}
                     />
-                    <Tooltip content={<WaterfallTip />} />
+                    <Tooltip content={<WaterfallTip />} cursor={CURSOR} />
                     {/* Base transparente — desloca a barra colorida para a posição correta */}
                     <Bar dataKey="base" stackId="wf" fill="transparent" legendType="none" isAnimationActive={false} />
                     {/* Barra colorida: azul=total, verde=acréscimo, vermelho=dedução, verde/vermelho=resultado final */}
@@ -866,7 +981,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                       <Pie data={ativoData} dataKey="value" cx="50%" cy="50%" outerRadius={65} innerRadius={38} paddingAngle={2} stroke="none">
                         {ativoData.map((_, i) => <Cell key={i} fill={PIE_ATIVO[i % PIE_ATIVO.length]} />)}
                       </Pie>
-                      <Tooltip content={<BrlTip />} />
+                      <Tooltip content={<BrlTip />} cursor={CURSOR} />
                     </PieChart>
                   </ResponsiveContainer>
                   <PieLegend data={ativoData} colors={PIE_ATIVO} />
@@ -883,7 +998,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
                       <Pie data={passivoData} dataKey="value" cx="50%" cy="50%" outerRadius={65} innerRadius={38} paddingAngle={2} stroke="none">
                         {passivoData.map((_, i) => <Cell key={i} fill={PIE_PASSIVO[i % PIE_PASSIVO.length]} />)}
                       </Pie>
-                      <Tooltip content={<BrlTip />} />
+                      <Tooltip content={<BrlTip />} cursor={CURSOR} />
                     </PieChart>
                   </ResponsiveContainer>
                   <PieLegend data={passivoData} colors={PIE_PASSIVO} />
@@ -895,16 +1010,14 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
       )}
 
       {/* ── Histórico de análises ─────────────────────────────────────── */}
+      {!hideHistory && (
       <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--bd)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--t0)', margin: 0 }}>Histórico de análises</h3>
           <span style={{ fontSize: 13, color: 'var(--t2)' }}>{analyses.length} {analyses.length === 1 ? 'análise' : 'análises'}</span>
         </div>
-        {!analyses.length ? (
-          <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--t3)' }}>
-            <i className="ti ti-file-off" style={{ fontSize: 28, display: 'block', marginBottom: 8, opacity: .4 }} />
-            Nenhuma análise realizada.
-          </div>
+        {!sorted.length ? (
+          <EmptyNote>Nenhum período selecionado.</EmptyNote>
         ) : (
           <div style={{ padding: '0 8px' }}>
             {[...analyses]
@@ -915,6 +1028,7 @@ export default function ClientDashboard({ clientId, backHref, allowDelete = true
           </div>
         )}
       </div>
+      )}
 
       {confirm && <ConfirmModal {...confirm} onClose={() => setConfirm(null)} />}
       {editModal && (

@@ -306,12 +306,46 @@ export async function initDb() {
     `ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN consented_at TIMESTAMP`,
     `ALTER TABLE users ADD COLUMN has_password INTEGER DEFAULT 0`,
+    // Número de cooperados/associados/colaboradores da organização — dado de
+    // identidade que o balanço não traz e que a própria conta informa.
+    `ALTER TABLE tenants ADD COLUMN member_count INTEGER`,
+    // Backfill: em contas de entidade única, o cliente-espelho tem que ter o
+    // mesmo nome do tenant. Ele era criado no cadastro e nunca acompanhava uma
+    // renomeação feita em Ajustes (corrigido em routes/account.js), então as
+    // contas renomeadas antes disso ficaram com o nome antigo espalhado por
+    // análises, relatórios e planilhas. Idempotente: só toca nas divergentes.
+    `UPDATE clients SET name = (SELECT t.name FROM tenants t WHERE t.self_client_id = clients.id)
+       WHERE EXISTS (SELECT 1 FROM tenants t WHERE t.self_client_id = clients.id AND t.name <> clients.name)`,
+    // Fim do teste gratuito. Contas criadas antes desta coluna recebem a data
+    // no backfill logo abaixo — a partir da própria data de cadastro, não de
+    // hoje: quem se cadastrou há três meses e nunca assinou já usou o teste.
+    `ALTER TABLE tenants ADD COLUMN trial_ends_at TIMESTAMP`,
     // Torna actor_id nullable para anonimização completa (LGPD)
     // — em Postgres funciona; em SQLite falha silenciosamente (driver não suporta)
     `ALTER TABLE audit_logs ALTER COLUMN actor_id DROP NOT NULL`,
   ]) {
     try { await db.exec(sql); } catch { /* já aplicado ou não suportado pelo driver */ }
   }
+
+  // Backfill do fim do teste. Feito em JS, e não em SQL, porque a aritmética de
+  // datas diverge entre os drivers (`datetime(x,'+7 days')` no SQLite,
+  // `x + interval '7 days'` no Postgres) e uma migração que falha em silêncio
+  // num deles é pior que nenhuma. Idempotente: só preenche quem está nulo.
+  try {
+    const { trialEndFrom } = await import('./plans.js');
+    const pendentes = await db.prepare(
+      `SELECT id, created_at FROM tenants WHERE plan = 'trial' AND trial_ends_at IS NULL`
+    ).all();
+    for (const t of pendentes) {
+      await db.prepare('UPDATE tenants SET trial_ends_at = ? WHERE id = ?')
+        .run(trialEndFrom(t.created_at), t.id);
+    }
+    if (pendentes.length) {
+      (await import('./logger.js')).default.info(
+        { tenants: pendentes.length }, 'trial_ends_at preenchido'
+      );
+    }
+  } catch { /* coluna ainda não existe em bancos muito antigos */ }
 
   // Limpar tokens expirados a cada inicialização
   await db.exec(`DELETE FROM email_verifications WHERE expires_at < CURRENT_TIMESTAMP`);

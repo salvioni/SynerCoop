@@ -1,6 +1,6 @@
 import { useEscapeKey } from '../lib/useEscapeKey.js';
 
-export default function ConfirmModal({ title, message, warning, confirmLabel = 'Confirmar', danger = false, onConfirm, onClose }) {
+export default function ConfirmModal({ title, message, warning, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', danger = false, onConfirm, onClose }) {
   useEscapeKey(onClose);
 
   return (
@@ -19,7 +19,7 @@ export default function ConfirmModal({ title, message, warning, confirmLabel = '
           )}
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn" onClick={onClose}>{cancelLabel}</button>
           <button className={`btn ${danger ? 'btn-d' : 'btn-p'}`} onClick={() => { onConfirm?.(); onClose?.(); }}>{confirmLabel}</button>
         </div>
       </div>

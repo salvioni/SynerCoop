@@ -7,6 +7,7 @@ import { generateReport } from '../lib/report.js';
 import { generateAnalysisNarrative } from '../lib/narrative.js';
 import { buildAnalysisExcel } from '../lib/excelExport.js';
 import { calculateIndicators } from '../lib/calculator.js';
+import { monthsInPeriod } from '../lib/period.js';
 import { periodSlug } from '../lib/period.js';
 
 const router = Router();
@@ -36,6 +37,28 @@ router.get('/', async (req, res, next) => {
 });
 
 // GET /analyses/:id
+// GET /analyses/modelo — baixa o Balanço Perguntado em branco.
+//
+// Uma conta recém-criada não tem o que analisar e pode nem ter a planilha. Sem
+// isto o primeiro passo do produto depende de a pessoa já possuir o arquivo,
+// que é justamente o que ela ainda não tem.
+//
+// Declarado ANTES de '/:id' de propósito: o Express casa a primeira rota
+// compatível, e '/:id' engoliria "modelo" como se fosse um identificador.
+router.get('/modelo', async (req, res, next) => {
+  try {
+    const { fileURLToPath } = await import('node:url');
+    const path = (await import('node:path')).default;
+    const fs = (await import('node:fs')).default;
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    const file = path.resolve(dir, '../assets/templates/balanco-perguntado.xlsx');
+    if (!fs.existsSync(file)) throw new Error('Modelo não encontrado no servidor.');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="balanco-perguntado.xlsx"');
+    fs.createReadStream(file).pipe(res);
+  } catch (e) { next(e); }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const analysis = await db.prepare(`
@@ -101,7 +124,7 @@ router.patch('/:id/data', async (req, res, next) => {
     }
 
     // Recalcula indicadores com os dados novos
-    const newIndicators = calculateIndicators({ bp: newBp, dsp: newDsp });
+    const newIndicators = calculateIndicators({ bp: newBp, dsp: newDsp, periodMonths: monthsInPeriod(analysis.period_label) });
 
     // Limpa a narrativa para forçar regeneração com os dados corretos
     await db.prepare(`

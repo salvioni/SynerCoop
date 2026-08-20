@@ -7,7 +7,7 @@ import {
 } from 'docx';
 import { imageSize } from 'image-size';
 import { parseJsonFromLLM } from './llm.js';
-import { buildNarrativePrompt, generateAnalysisNarrative } from './narrative.js';
+import { buildNarrativePrompt, generateAnalysisNarrative, normalizeRecomendacao, normalizeNarrative } from './narrative.js';
 
 const LOGO_MIME_TO_DOCX_TYPE = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/bmp': 'bmp' };
 const LOGO_MAX_WIDTH = 160;
@@ -181,7 +181,9 @@ async function buildDocx(companyName, companyType, year, narrative, logo, signat
       // dava vazio silenciosamente e derrubava junto o selo de prioridade.
       // Por isso o selo agora é sempre mostrado (vem do índice, não do
       // texto), e só limpamos o prefixo "Recomendação N:" da descrição.
-      const desc = rec.replace(/^Recomendação\s*\d*\s*:\s*/i, '').trim() || rec;
+      // Narrativas salvas antes da normalização podem ter objetos aqui.
+      const recText = normalizeRecomendacao(rec);
+      const desc = recText.replace(/^Recomendação\s*\d*\s*:\s*/i, '').trim() || recText;
       const priority = i < 2 ? 'ALTA' : 'MÉDIA';
       const prColor = i < 2 ? RED_T : YELLOW_T;
 
@@ -257,6 +259,10 @@ async function buildDocx(companyName, companyType, year, narrative, logo, signat
 }
 
 export async function generateReport(companyName, companyType, year, indicators, bp, dsp, existingNarrative, logo, signature, periodLabel) {
-  const narrative = existingNarrative || await generateAnalysisNarrative({ companyName, companyType, year, indicators, bp, dsp });
+  // normalizeNarrative também no caminho da narrativa já salva: as gravadas
+  // antes desta correção podem trazer objetos onde o docx espera texto.
+  const narrative = normalizeNarrative(
+    existingNarrative || await generateAnalysisNarrative({ companyName, companyType, year, indicators, bp, dsp })
+  );
   return buildDocx(companyName, companyType, year, narrative, logo, signature, periodLabel);
 }

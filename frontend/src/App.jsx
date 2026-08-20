@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/auth.jsx';
 import { ThemeProvider } from './lib/theme.jsx';
 import { AccountInfoProvider } from './lib/accountInfo.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Login from './pages/Login.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
@@ -10,6 +11,7 @@ import AcceptInvite from './pages/AcceptInvite.jsx';
 import SelectPlan from './pages/SelectPlan.jsx';
 import AppShell from './pages/AppShell.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Desempenho from './pages/Desempenho.jsx';
 import Clients from './pages/Clients.jsx';
 import ClientView from './pages/ClientView.jsx';
 import AnalysisView from './pages/AnalysisView.jsx';
@@ -64,6 +66,7 @@ function GuestOnly({ children }) {
 export default function App() {
   return (
     <ThemeProvider>
+    <ErrorBoundary>
     <Routes>
       <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
       <Route path="/register" element={<GuestOnly><Login /></GuestOnly>} />
@@ -75,6 +78,9 @@ export default function App() {
       <Route path="/app" element={<Guard><AccountInfoProvider><AppShell /></AccountInfoProvider></Guard>}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
+        {/* Painel de evolução da própria organização — só existe em conta de
+            entidade única, que é onde ele tem um cliente-espelho para ler. */}
+        <Route path="desempenho" element={<Desempenho />} />
         <Route path="clients" element={<SingleEntityGuard><Clients /></SingleEntityGuard>} />
         <Route path="clients/:id" element={<SingleEntityGuard><ClientView /></SingleEntityGuard>} />
         <Route path="analyses" element={<AnalysesList />} />
@@ -91,6 +97,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
+    </ErrorBoundary>
     </ThemeProvider>
   );
 }

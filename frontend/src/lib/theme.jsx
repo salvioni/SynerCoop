@@ -1,7 +1,14 @@
 import { createContext, useContext, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
 const GLOBAL_KEY = 'synercoop-theme';
 const ThemeCtx = createContext({ theme: 'light', setTheme: () => {} });
+
+function resolveDark(theme) {
+  if (theme === 'dark') return true;
+  if (theme === 'system') return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return false;
+}
 
 function userKey(userId) {
   return userId ? `synercoop-theme-u${userId}` : GLOBAL_KEY;
@@ -16,10 +23,20 @@ function getStoredTheme(userId) {
   );
 }
 
-function applyTheme(theme) {
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const isDark = theme === 'dark' || (theme === 'system' && prefersDark);
-  document.documentElement.classList.toggle('theme-dark', isDark);
+/**
+ * O tema escuro é uma preferência de trabalho, de quem passa o dia dentro do
+ * sistema. As telas públicas — site, login, cadastro, recuperação de senha —
+ * são a cara da marca e existem numa versão só, a clara: elas precisam sair
+ * iguais em qualquer navegador, e não faz sentido a página de login herdar a
+ * escolha da última pessoa que usou aquele computador.
+ */
+function areaEscura(pathname) {
+  return pathname.startsWith('/app') || pathname.startsWith('/admin');
+}
+
+function applyTheme(theme, pathname = window.location.pathname) {
+  const dark = areaEscura(pathname) && resolveDark(theme);
+  document.documentElement.classList.toggle('theme-dark', dark);
 }
 
 // Chamado antes do React montar para evitar flash de tema errado
@@ -28,6 +45,7 @@ export function initTheme() {
 }
 
 export function ThemeProvider({ children }) {
+  const { pathname } = useLocation();
   const [userId, setUserId] = useState(null);
   const [theme, setThemeState] = useState(() => {
     // Migrar chaves antigas
@@ -55,16 +73,18 @@ export function ThemeProvider({ children }) {
     setThemeState(t);
   }
 
+  // Depende também da rota: sair da conta leva pro /login, que é área clara,
+  // e voltar pro /app restaura a preferência sem precisar recarregar.
   useEffect(() => {
-    applyTheme(theme);
+    applyTheme(theme, pathname);
 
     if (theme === 'system') {
       const mq = window.matchMedia('(prefers-color-scheme: dark)');
-      const handler = () => applyTheme('system');
+      const handler = () => applyTheme('system', pathname);
       mq.addEventListener('change', handler);
       return () => mq.removeEventListener('change', handler);
     }
-  }, [theme]);
+  }, [theme, pathname]);
 
   return <ThemeCtx.Provider value={{ theme, setTheme }}>{children}</ThemeCtx.Provider>;
 }
